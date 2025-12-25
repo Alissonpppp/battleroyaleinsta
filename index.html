@@ -29,6 +29,16 @@
             to { opacity: 1; }
         }
         .animate-fade-in { animation: fade-in 0.5s ease-out; }
+
+        /* Indicador de gravação pulsante */
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .recording-pulse {
+            animation: pulse-red 2s infinite;
+        }
     </style>
 </head>
 <body>
@@ -108,6 +118,8 @@
         const RotateCcw = (props) => <Icon {...props} path={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />;
         const Volume2 = (props) => <Icon {...props} path={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></>} />;
         const VolumeX = (props) => <Icon {...props} path={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>} />;
+        const Video = (props) => <Icon {...props} path={<><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></>} />;
+        const Square = (props) => <Icon {...props} path={<rect width="18" height="18" x="3" y="3" rx="2" ry="2" />} />;
 
         function InstagramBattle() {
             const [gameState, setGameState] = useState('setup'); // setup, fighting, winner
@@ -117,10 +129,13 @@
             const [speed, setSpeed] = useState(1);
             const [winner, setWinner] = useState(null);
             const [isMuted, setIsMuted] = useState(false);
+            const [isRecording, setIsRecording] = useState(false);
             
             const arenaRef = useRef(null);
             const animationFrame = useRef(null);
-            const fightersRef = useRef([]); 
+            const fightersRef = useRef([]);
+            const mediaRecorderRef = useRef(null);
+            const chunksRef = useRef([]);
 
             // Helper para detectar colisão e resolver física
             const checkCollision = (f1, f2) => {
@@ -321,6 +336,63 @@
                 if (audioCtx.state === 'suspended') audioCtx.resume();
             };
 
+            const toggleRecording = async () => {
+                if (!isRecording) {
+                    try {
+                        // Pede para o usuário selecionar a aba atual
+                        // Dica: A API getDisplayMedia grava a tela. O usuário deve selecionar a aba atual e "Compartilhar áudio"
+                        const stream = await navigator.mediaDevices.getDisplayMedia({
+                            video: { mediaSource: 'screen' },
+                            audio: true, // Solicita áudio do sistema/aba
+                            preferCurrentTab: true
+                        });
+
+                        const mimeType = MediaRecorder.isTypeSupported("video/webm; codecs=vp9")
+                                        ? "video/webm; codecs=vp9"
+                                        : "video/webm";
+
+                        const mediaRecorder = new MediaRecorder(stream, { mimeType });
+                        mediaRecorderRef.current = mediaRecorder;
+                        chunksRef.current = [];
+
+                        mediaRecorder.ondataavailable = (e) => {
+                            if (e.data.size > 0) chunksRef.current.push(e.data);
+                        };
+
+                        mediaRecorder.onstop = () => {
+                            const blob = new Blob(chunksRef.current, { type: "video/webm" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = `bate-bate-royale-${new Date().getTime()}.webm`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                            setIsRecording(false);
+                            
+                            // Para as tracks
+                            stream.getTracks().forEach(track => track.stop());
+                        };
+
+                        mediaRecorder.start();
+                        setIsRecording(true);
+
+                        // Se o usuário parar pelo navegador
+                        stream.getVideoTracks()[0].onended = () => {
+                            if (mediaRecorder.state !== 'inactive') {
+                                mediaRecorder.stop();
+                            }
+                        };
+
+                    } catch (err) {
+                        console.error("Erro gravação:", err);
+                    }
+                } else {
+                    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+                        mediaRecorderRef.current.stop();
+                    }
+                }
+            };
+
             return (
                 <div className="fixed inset-0 bg-black text-white font-sans overflow-hidden select-none">
                     
@@ -344,6 +416,16 @@
 
                         {/* Controls Group */}
                         <div className="flex gap-2 pointer-events-auto items-center">
+                            
+                            {/* Recording Toggle */}
+                             <button 
+                                onClick={toggleRecording}
+                                className={`p-2 rounded-lg transition border ${isRecording ? 'bg-red-600 border-red-500 text-white recording-pulse' : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white hover:bg-gray-700'}`}
+                                title={isRecording ? "Parar Gravação (Baixar)" : "Gravar Jogo"}
+                            >
+                                {isRecording ? <Square size={20} fill="currentColor" /> : <Video size={20} />}
+                            </button>
+
                             {/* Sound Toggle */}
                             <button 
                                 onClick={toggleSound}
