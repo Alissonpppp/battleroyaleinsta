@@ -19,9 +19,9 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, setDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        window.firebaseModules = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp };
+        window.firebaseModules = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, collection, addDoc, getDocs, deleteDoc, doc, setDoc, query, orderBy, serverTimestamp };
     </script>
     
     <style>
@@ -46,9 +46,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback, memo } = React;
 
-        // ==========================================================================================
-        // --- ÁREA DE CONFIGURAÇÃO (PREENCHIDA COM SEUS DADOS) ---
-        // ==========================================================================================
+        // SEUS DADOS DO FIREBASE
         const MY_FIREBASE_CONFIG = {
             apiKey: "AIzaSyDfHbm9EEHHYsJjkrPcQuGz2W08yfihnKg",
             authDomain: "haking-251e5.firebaseapp.com",
@@ -57,7 +55,6 @@
             messagingSenderId: "966045519428",
             appId: "1:966045519428:web:e6090e86269820c1bb7611"
         };
-        // ==========================================================================================
 
         const DEFAULT_AVATAR = "https://upload.wikimedia.org/wikipedia/commons/a/ac/Default_pfp.jpg";
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -76,17 +73,13 @@
             try {
                 let firebaseConfig = JSON.parse(window.__firebase_config || '{}');
                 
-                // Detecta se deve usar a config manual (GitHub)
                 if (MY_FIREBASE_CONFIG.apiKey && MY_FIREBASE_CONFIG.apiKey.length > 5) {
                     firebaseConfig = MY_FIREBASE_CONFIG;
                     isManualConfig = true;
-                    console.log("Modo GitHub/Hospedagem: Usando 'battles' na raiz do Firestore.");
+                    console.log("Modo GitHub/Hospedagem: Usando configuração manual.");
                 }
                 
-                if (!firebaseConfig.apiKey) {
-                    console.warn("Sem configuração do Firebase (Modo Offline)");
-                    return;
-                }
+                if (!firebaseConfig.apiKey) { console.warn("Sem configuração do Firebase (Modo Offline)"); return; }
 
                 globalAppId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
                 
@@ -95,13 +88,9 @@
                 db = getFirestore(app); 
 
                 try {
-                    if (isManualConfig) {
-                        await signInAnonymously(auth);
-                    } else if (window.__initial_auth_token) {
-                        await signInWithCustomToken(auth, window.__initial_auth_token);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
+                    if (isManualConfig) await signInAnonymously(auth);
+                    else if (window.__initial_auth_token) await signInWithCustomToken(auth, window.__initial_auth_token);
+                    else await signInAnonymously(auth);
                     console.log("Firebase Autenticado! UID:", auth.currentUser?.uid);
                 } catch (authError) {
                     console.error("Erro Autenticação:", authError);
@@ -111,51 +100,13 @@
                 window.firebaseInitialized = true;
             } catch (e) { 
                 console.error("Erro Inicialização Firebase:", e);
-                alert("Erro ao iniciar Firebase: " + e.message);
             }
         };
 
-        const playHitSound = (muted) => {
-            if (muted || audioCtx.state === 'suspended') { audioCtx.resume(); if(muted) return; }
-            const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(100 + Math.random()*50, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.1);
-            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-            osc.start(); osc.stop(audioCtx.currentTime + 0.1);
-        };
-
-        const playWinSound = (muted) => {
-            if (muted) return;
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            const now = audioCtx.currentTime;
-            [0, 0.2, 0.4, 0.6].forEach((o, i) => {
-                const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
-                osc.connect(gain); gain.connect(audioCtx.destination);
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime([523.25, 659.25, 783.99, 1046.50][i], now + o);
-                gain.gain.setValueAtTime(0, now + o);
-                gain.gain.linearRampToValueAtTime(0.1, now + o + 0.05);
-                gain.gain.exponentialRampToValueAtTime(0.01, now + o + 0.5);
-                osc.start(now + o); osc.stop(now + o + 0.5);
-            });
-        };
-
-        // --- Components ---
-        const FighterAvatar = memo(({ url, name }) => {
-            return (
-                <img 
-                    src={url || DEFAULT_AVATAR} 
-                    alt={name} 
-                    className="w-full h-full object-cover" 
-                    referrerPolicy="no-referrer"
-                    onError={(e) => { e.target.src = DEFAULT_AVATAR; }} 
-                />
-            );
-        });
-
+        const playHitSound = (muted) => { if (muted || audioCtx.state === 'suspended') { audioCtx.resume(); if(muted) return; } const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination); osc.type = 'square'; osc.frequency.setValueAtTime(100 + Math.random()*50, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.1); gain.gain.setValueAtTime(0.1, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); osc.start(); osc.stop(audioCtx.currentTime + 0.1); };
+        const playWinSound = (muted) => { if (muted) return; if (audioCtx.state === 'suspended') audioCtx.resume(); const now = audioCtx.currentTime; [0, 0.2, 0.4, 0.6].forEach((o, i) => { const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination); osc.type = 'triangle'; osc.frequency.setValueAtTime([523.25, 659.25, 783.99, 1046.50][i], now + o); gain.gain.setValueAtTime(0, now + o); gain.gain.linearRampToValueAtTime(0.1, now + o + 0.05); gain.gain.exponentialRampToValueAtTime(0.01, now + o + 0.5); osc.start(now + o); osc.stop(now + o + 0.5); }); };
+        
+        const FighterAvatar = memo(({ url, name }) => { return <img src={url || DEFAULT_AVATAR} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e) => { e.target.src = DEFAULT_AVATAR; }} />; });
         const Icon = ({ path, className, size=24 }) => ( <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{path}</svg> );
         const Swords = (p) => <Icon {...p} path={<><path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="m13 19 6-6"/><path d="M16 16 7 7"/><path d="m21 21-6-6"/></>} />;
         const Trophy = (p) => <Icon {...p} path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />;
@@ -177,6 +128,8 @@
         const Search = (p) => <Icon {...p} path={<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>} />;
         const Trash = (p) => <Icon {...p} path={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>} />;
         const CloudUpload = (p) => <Icon {...p} path={<><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></>} />;
+        const Star = (p) => <Icon {...p} path={<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>} />;
+        const Calendar = (p) => <Icon {...p} path={<><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></>} />;
 
         function InstagramBattle() {
             const [gameState, setGameState] = useState('setup');
@@ -201,6 +154,11 @@
             const [savedBattles, setSavedBattles] = useState([]);
             const [searchQuery, setSearchQuery] = useState('');
             const [selectedBattle, setSelectedBattle] = useState(null);
+            
+            // --- EVENT STATES ---
+            const [eventName, setEventName] = useState('');
+            const [eventPrize, setEventPrize] = useState('');
+            const [eventDays, setEventDays] = useState(30);
 
             const arenaRef = useRef(null);
             const animationFrame = useRef(null);
@@ -351,7 +309,6 @@
                                 if (roll < 0.45) {
                                     f2.hp = Math.max(0, f2.hp - dmg); msg = `@${f1.name} hit @${f2.name} (-${dmg})`; playHitSound(isMuted);
                                     const hpBar = document.getElementById(`hp-bar-${f2.id}`); if(hpBar) { hpBar.style.width = `${f2.hp}%`; if(f2.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
-                                    // Remove ghost logic: Hide immediately
                                     if (f2.hp <= 0 && f2.eliminationOrder === -1) { 
                                         f2.eliminationOrder = eliminationCounter.current++; 
                                         const elF2 = document.getElementById(`fighter-${f2.id}`); 
@@ -360,7 +317,6 @@
                                 } else if (roll < 0.90) {
                                     f1.hp = Math.max(0, f1.hp - dmg); msg = `@${f2.name} hit @${f1.name} (-${dmg})`; playHitSound(isMuted);
                                     const hpBar = document.getElementById(`hp-bar-${f1.id}`); if(hpBar) { hpBar.style.width = `${f1.hp}%`; if(f1.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
-                                    // Remove ghost logic: Hide immediately
                                     if (f1.hp <= 0 && f1.eliminationOrder === -1) { 
                                         f1.eliminationOrder = eliminationCounter.current++; 
                                         const elF1 = document.getElementById(`fighter-${f1.id}`); 
@@ -411,46 +367,31 @@
                 };
 
                 try {
-                    // Tenta salvar no Firebase se disponível
                     if (db && auth && auth.currentUser) {
                         const { collection, addDoc, serverTimestamp } = window.firebaseModules;
                         const userId = auth.currentUser.uid;
-                        // LOGICA CORRIGIDA: Se for manual, usa raiz 'battles'.
-                        const battleCollection = isManualConfig 
-                            ? collection(db, 'battles') 
-                            : collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles');
-
+                        const battleCollection = isManualConfig ? collection(db, 'battles') : collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles');
                         await addDoc(battleCollection, { 
-                            name: newBattle.name,
-                            date: serverTimestamp(),
-                            winner: newBattle.winner,
-                            ranking: newBattle.ranking,
-                            createdBy: userId
+                            name: newBattle.name, date: serverTimestamp(), winner: newBattle.winner, ranking: simpleRanking, createdBy: userId
                         });
                         alert("Ranking salvo na nuvem com sucesso!");
-                    } else {
-                        throw new Error("Modo Offline");
-                    }
+                    } else { throw new Error("Modo Offline"); }
                 } catch (e) { 
-                    console.log("Salvando localmente devido a:", e);
-                    // Show exact Firebase error to help debug
-                    const errMsg = e.code ? `Erro Firebase: ${e.code}` : e.message;
+                    console.log("Salvando localmente:", e);
                     const saved = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
                     saved.push(newBattle);
                     localStorage.setItem('batebate_rankings', JSON.stringify(saved));
-                    alert(`Não foi possível salvar na nuvem (${errMsg}).\n\nO ranking foi salvo LOCALMENTE no seu navegador.`); 
+                    alert("Ranking salvo LOCALMENTE."); 
                 }
                 setIsSaving(false);
             };
 
             const deleteRanking = async (id, e) => {
                 e.stopPropagation();
-                if (!confirm("Tem certeza que deseja excluir este ranking?")) return;
-                
+                if (!confirm("Excluir?")) return;
                 if (id.startsWith('local-')) {
                     const saved = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
-                    const filtered = saved.filter(b => b.id !== id);
-                    localStorage.setItem('batebate_rankings', JSON.stringify(filtered));
+                    localStorage.setItem('batebate_rankings', JSON.stringify(saved.filter(b => b.id !== id)));
                     setSavedBattles(prev => prev.filter(b => b.id !== id));
                 } else if (db) {
                     try {
@@ -458,91 +399,63 @@
                         const path = isManualConfig ? 'battles' : `artifacts/${globalAppId}/public/data/battles`;
                         await deleteDoc(doc(db, path, id));
                         setSavedBattles(prev => prev.filter(b => b.id !== id));
-                    } catch (err) { console.error(err); alert("Erro ao excluir da nuvem: " + err.code); }
+                    } catch (err) { console.error(err); alert("Erro ao excluir."); }
                 }
                 if (selectedBattle?.id === id) setSelectedBattle(null);
             };
 
             const publishToCloud = async (battle, e) => {
                 e.stopPropagation();
-                if (!db) { alert("Erro: Firebase não inicializado."); return; }
-                if (!auth.currentUser) { alert("Erro: Não autenticado na nuvem."); return; }
-
-                if (!confirm("Deseja publicar este ranking local na nuvem agora?")) return;
-
+                if (!db || !auth.currentUser) { alert("Sem conexão com Firebase."); return; }
+                if (!confirm("Publicar na nuvem?")) return;
                 try {
                     const { collection, addDoc } = window.firebaseModules;
-                    
                     const { id, ...data } = battle;
-                    // Converte seconds de volta para Date js para o Firestore
                     const dateObj = new Date(data.date.seconds * 1000);
-
-                    // LOGICA CORRIGIDA
-                    const battleCollection = isManualConfig 
-                        ? collection(db, 'battles') 
-                        : collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles');
-
-                    await addDoc(battleCollection, {
-                        ...data,
-                        date: dateObj, 
-                        createdBy: auth.currentUser.uid,
-                        publishedFromLocal: true
-                    });
-
+                    const battleCollection = isManualConfig ? collection(db, 'battles') : collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles');
+                    await addDoc(battleCollection, { ...data, date: dateObj, createdBy: auth.currentUser.uid, publishedFromLocal: true });
                     const saved = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
-                    const filtered = saved.filter(b => b.id !== id);
-                    localStorage.setItem('batebate_rankings', JSON.stringify(filtered));
-
-                    alert("Sucesso! O ranking agora está na nuvem.");
-                    openRankingBrowser(); 
-                } catch (err) {
-                    console.error(err);
-                    alert("Erro ao publicar: " + err.message);
-                }
+                    localStorage.setItem('batebate_rankings', JSON.stringify(saved.filter(b => b.id !== id)));
+                    alert("Sucesso!"); openRankingBrowser(); 
+                } catch (err) { alert("Erro ao publicar: " + err.message); }
             };
 
-            const copyRankingForBio = () => {
-                const top5 = finalRanking.slice(0, 5);
-                let text = `👑 Batalha Royale: ${battleName}\n\n`;
-                const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-                top5.forEach((f, i) => { text += `${medals[i] || '🏅'} @${f.name}\n`; });
-                text += `\n... e mais ${finalRanking.length - 5} guerreiros!`;
-                navigator.clipboard.writeText(text);
-                alert("Copiado!");
+            // --- EVENT FUNCTIONS ---
+            const createEvent = async () => {
+                if (!db || !auth.currentUser) { alert("Precisa estar online para criar eventos."); return; }
+                if (!eventName || !eventPrize) { alert("Preencha os campos."); return; }
+                
+                try {
+                    const { doc, setDoc, serverTimestamp } = window.firebaseModules;
+                    const path = isManualConfig ? 'current_event' : `artifacts/${globalAppId}/public/data/current_event`;
+                    
+                    const endDate = new Date();
+                    endDate.setDate(endDate.getDate() + parseInt(eventDays));
+
+                    await setDoc(doc(db, path, 'active'), {
+                        title: eventName,
+                        prize: eventPrize,
+                        startDate: serverTimestamp(),
+                        endDate: endDate,
+                        active: true
+                    });
+                    alert("Evento Criado!");
+                    setGameState('setup');
+                } catch(e) { console.error(e); alert("Erro ao criar evento."); }
             };
 
-            const toggleRecording = async () => {
-                if (!isRecording) {
-                    try {
-                        const stream = await navigator.mediaDevices.getDisplayMedia({ video: { mediaSource: 'screen', frameRate: 30 }, audio: true, preferCurrentTab: true });
-                        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-                        mediaRecorderRef.current = mediaRecorder; chunksRef.current = [];
-                        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-                        mediaRecorder.onstop = () => {
-                            const blob = new Blob(chunksRef.current, { type: "video/webm" });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement("a"); a.href = url; a.download = `bate-bate-${Date.now()}.webm`; a.click();
-                            URL.revokeObjectURL(url); setIsRecording(false); stream.getTracks().forEach(t => t.stop());
-                        };
-                        mediaRecorder.start(); setIsRecording(true);
-                        stream.getVideoTracks()[0].onended = () => { if (mediaRecorder.state !== 'inactive') mediaRecorder.stop(); };
-                    } catch (err) { console.error(err); }
-                } else { if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current.stop(); }
-            };
+            // ... [Outras funções auxiliares] ...
+            const copyRankingForBio = () => { const top5 = finalRanking.slice(0, 5); let text = `👑 Batalha Royale: ${battleName}\n\n`; const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣']; top5.forEach((f, i) => { text += `${medals[i] || '🏅'} @${f.name}\n`; }); text += `\n... e mais ${finalRanking.length - 5} guerreiros!`; navigator.clipboard.writeText(text); alert("Copiado!"); };
+            const toggleRecording = async () => { if (!isRecording) { try { const stream = await navigator.mediaDevices.getDisplayMedia({ video: { mediaSource: 'screen', frameRate: 30 }, audio: true, preferCurrentTab: true }); const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' }); mediaRecorderRef.current = mediaRecorder; chunksRef.current = []; mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); }; mediaRecorder.onstop = () => { const blob = new Blob(chunksRef.current, { type: "video/webm" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `bate-bate-${Date.now()}.webm`; a.click(); URL.revokeObjectURL(url); setIsRecording(false); stream.getTracks().forEach(t => t.stop()); }; mediaRecorder.start(); setIsRecording(true); stream.getVideoTracks()[0].onended = () => { if (mediaRecorder.state !== 'inactive') mediaRecorder.stop(); }; } catch (err) { console.error(err); } } else { if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current.stop(); } };
 
             const openRankingBrowser = async () => {
                 setGameState('ranking_browser');
                 let allBattles = [];
                 try { const localData = JSON.parse(localStorage.getItem('batebate_rankings') || '[]'); allBattles = [...localData]; } catch(e) {}
-
                 if (db && auth && auth.currentUser) {
                     const { collection, getDocs, query, orderBy } = window.firebaseModules;
                     try {
-                        // LOGICA CORRIGIDA
-                        const battleCollection = isManualConfig 
-                            ? collection(db, 'battles') 
-                            : collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles');
-                            
+                        const battleCollection = isManualConfig ? collection(db, 'battles') : collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles');
                         const snapshot = await getDocs(battleCollection);
                         const cloudBattles = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
                         allBattles = [...allBattles, ...cloudBattles];
@@ -561,7 +474,7 @@
                             <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-yellow-500 drop-shadow-md flex items-center gap-2"><Swords className="text-white" size={24} /> Bate-Bate Royale</h1>
                             {gameState === 'fighting' && <div className="text-green-400 font-mono text-sm mt-1 bg-black/50 inline-block px-2 rounded backdrop-blur"><span className="font-bold">Vivos:</span> {fighters.filter(f => f.hp > 0).length}</div>}
                         </div>
-                        {!cinemaMode && gameState !== 'ranking_browser' && (
+                        {!cinemaMode && gameState !== 'ranking_browser' && gameState !== 'event_manager' && (
                             <div className="flex gap-2 pointer-events-auto items-center animate-fade-in">
                                 <button onClick={toggleRecording} className={`p-2 rounded-lg transition border ${isRecording ? 'bg-red-600 border-red-500 text-white recording-pulse' : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white'}`}><Video size={20} /></button>
                                 <button onClick={() => setIsMuted(!isMuted)} className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white transition">{isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
@@ -584,7 +497,10 @@
                             <div className="w-full max-w-2xl bg-gray-900/90 backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-gray-700 flex flex-col gap-4">
                                 <div className="flex justify-between items-center">
                                     <h2 className="text-2xl font-bold">Configurar Arena</h2>
-                                    <button onClick={openRankingBrowser} className="text-sm bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded text-yellow-400 border border-yellow-500/30 flex items-center gap-2"><List size={14}/> Ver Rankings Salvos</button>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => setGameState('event_manager')} className="text-sm bg-purple-600 hover:bg-purple-500 px-3 py-1 rounded text-white border border-purple-400/30 flex items-center gap-2"><Trophy size={14}/> Gerenciar Evento</button>
+                                        <button onClick={openRankingBrowser} className="text-sm bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded text-yellow-400 border border-yellow-500/30 flex items-center gap-2"><List size={14}/> Rankings</button>
+                                    </div>
                                 </div>
                                 <div className="flex gap-4 w-full">
                                     <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-pink-500 transition relative"><label className="flex flex-col items-center cursor-pointer group h-full justify-center"><div className="flex items-center gap-2 text-pink-400 group-hover:text-pink-300 transition"><FileUp size={24}/><span className="font-bold text-sm">Lista (.txt/.csv)</span></div><input type="file" accept=".txt,.csv" onChange={handleFileUpload} className="hidden"/></label></div>
@@ -599,154 +515,27 @@
                         </div>
                     )}
 
-                    {gameState === 'ranking_browser' && (
-                        <div className="relative z-50 w-full h-full bg-gray-900 text-white flex flex-col md:flex-row overflow-hidden pt-16">
-                            <div className="w-full md:w-1/3 bg-gray-800 border-r border-gray-700 flex flex-col">
-                                <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800 z-10">
-                                    <h2 className="font-bold text-xl flex items-center gap-2"><List/> Batalhas</h2>
-                                    <button onClick={() => setGameState('setup')} className="text-gray-400 hover:text-white"><Icon path={<><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>}/></button>
+                    {gameState === 'event_manager' && (
+                        <div className="relative z-50 flex items-center justify-center h-full p-4">
+                            <div className="w-full max-w-md bg-gray-900 p-8 rounded-2xl shadow-2xl border border-purple-500 flex flex-col gap-4">
+                                <h2 className="text-2xl font-bold text-purple-400 flex items-center gap-2"><Trophy/> Criar Novo Evento</h2>
+                                <p className="text-gray-400 text-sm">Inicia uma temporada de pontuação. Batalhas salvas a partir de agora contarão pontos para este evento.</p>
+                                <input type="text" value={eventName} onChange={(e) => setEventName(e.target.value)} placeholder="Nome (ex: Maratona R$100)" className="bg-gray-800 p-3 rounded text-white" />
+                                <input type="text" value={eventPrize} onChange={(e) => setEventPrize(e.target.value)} placeholder="Prêmio (ex: R$ 100 via PIX)" className="bg-gray-800 p-3 rounded text-white" />
+                                <div className="flex items-center gap-2 text-gray-300"><span className="text-sm">Duração (dias):</span><input type="number" value={eventDays} onChange={(e) => setEventDays(e.target.value)} className="bg-gray-800 p-2 rounded text-white w-20" /></div>
+                                <div className="flex gap-2 mt-4">
+                                    <button onClick={() => setGameState('setup')} className="flex-1 bg-gray-700 p-3 rounded font-bold">Cancelar</button>
+                                    <button onClick={createEvent} className="flex-1 bg-purple-600 hover:bg-purple-500 p-3 rounded font-bold text-white">Criar & Iniciar</button>
                                 </div>
-                                <div className="flex-1 overflow-y-auto">
-                                    {savedBattles.length === 0 && <p className="text-gray-500 text-center mt-10">Nenhuma batalha salva.</p>}
-                                    {savedBattles.map(b => (
-                                        <div 
-                                            key={b.id} 
-                                            onClick={() => setSelectedBattle(b)}
-                                            className={`p-4 border-b border-gray-700 cursor-pointer hover:bg-gray-700 transition flex justify-between items-center ${selectedBattle?.id === b.id ? 'bg-gray-700 border-l-4 border-l-pink-500' : ''}`}
-                                        >
-                                            <div>
-                                                <div className="font-bold text-lg flex items-center gap-2">
-                                                    {b.name}
-                                                    {b.id.toString().startsWith('local-') && (
-                                                        <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-1 rounded border border-yellow-500/30">LOCAL</span>
-                                                    )}
-                                                </div>
-                                                <div className="text-sm text-gray-400 flex gap-4">
-                                                    <span>🏆 {b.winner}</span>
-                                                    <span>{b.date ? new Date(b.date.seconds * 1000).toLocaleDateString() : 'Hoje'}</span>
-                                                </div>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                {b.id.toString().startsWith('local-') && (
-                                                    <button 
-                                                        onClick={(e) => publishToCloud(b, e)} 
-                                                        className="text-green-400 hover:text-green-300 p-2 rounded-full hover:bg-green-500/10"
-                                                        title="Publicar na Nuvem"
-                                                    >
-                                                        <CloudUpload size={18}/>
-                                                    </button>
-                                                )}
-                                                <button onClick={(e) => deleteRanking(b.id, e)} className="text-red-500 hover:text-red-400 p-2 rounded-full hover:bg-red-500/10"><Trash size={18}/></button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="flex-1 bg-gray-900 flex flex-col h-full overflow-hidden">
-                                {selectedBattle ? (
-                                    <>
-                                        <div className="p-6 border-b border-gray-800 bg-gray-900 z-10 flex flex-col md:flex-row justify-between items-center gap-4">
-                                            <div>
-                                                <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-yellow-500">{selectedBattle.name}</h1>
-                                                <p className="text-gray-400">Total de Jogadores: {selectedBattle.ranking.length}</p>
-                                            </div>
-                                            <div className="relative">
-                                                <input type="text" placeholder="Buscar nome..." className="bg-gray-800 border border-gray-600 rounded-full px-4 py-2 pl-10 focus:outline-none focus:border-pink-500 w-64" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-                                                <div className="absolute left-3 top-2.5 text-gray-400"><Search size={16}/></div>
-                                            </div>
-                                        </div>
-                                        <div className="flex-1 overflow-y-auto p-4">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                {selectedBattle.ranking.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).map((player) => (
-                                                    <div key={player.position} className={`flex items-center gap-4 p-3 rounded-lg border ${player.position === 1 ? 'bg-yellow-500/10 border-yellow-500' : 'bg-gray-800 border-gray-700'}`}>
-                                                        <div className={`font-bold text-xl w-8 text-center ${player.position === 1 ? 'text-yellow-400' : player.position === 2 ? 'text-gray-300' : player.position === 3 ? 'text-orange-400' : 'text-gray-500'}`}>{player.position}</div>
-                                                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-gray-600"><FighterAvatar url={player.avatar || DEFAULT_AVATAR} name={player.name} /></div>
-                                                        <div className="font-bold truncate text-white">@{player.name}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </>
-                                ) : <div className="flex items-center justify-center h-full text-gray-500">Selecione uma batalha para ver o ranking completo.</div>}
                             </div>
                         </div>
                     )}
 
-                    {gameState === 'loading' && (
-                        <div className="relative z-50 flex flex-col items-center justify-center h-full p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-                            <div className="w-full max-w-md bg-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700 text-center">
-                                <h2 className="text-2xl font-bold mb-2">Carregando Recursos</h2>
-                                <p className="text-gray-400 text-sm mb-6">Processando imagens: {loadedCount} / {totalToLoad}</p>
-                                <div className="w-full h-4 bg-gray-700 rounded-full overflow-hidden mb-8"><div className="h-full bg-gradient-to-r from-pink-500 to-yellow-500 loader-bar" style={{ width: `${loadProgress}%` }}></div></div>
-                                <button onClick={startBattle} disabled={loadProgress < 100} className={`w-full py-4 rounded-xl font-bold text-xl flex items-center justify-center gap-2 transition transform ${loadProgress >= 100 ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105 shadow-lg text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed grayscale'}`}>
-                                    {loadProgress < 100 ? <><Loader size={24} /> AGUARDE...</> : <><PlayCircle size={28} /> INICIAR BATALHA</>}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    <div ref={arenaRef} className="absolute inset-0 overflow-hidden">
-                        {(gameState === 'fighting' || gameState === 'winner') && fighters.map((f) => (
-                            <div 
-                                key={f.id} 
-                                id={`fighter-${f.id}`} 
-                                className="absolute flex flex-col items-center justify-center fighter-container" 
-                                style={{ 
-                                    width: `${f.size}px`, 
-                                    transform: `translate(${f.x}px, ${f.y}px)`, 
-                                    zIndex: 10,
-                                    // FIXED: Directly control visibility via React based on state, ensures no ghosts
-                                    display: f.hp <= 0 ? 'none' : 'flex' 
-                                }}
-                            >
-                                <div className="relative w-full aspect-square rounded-full border-4 border-white/20 overflow-hidden shadow-xl bg-gray-800">
-                                    <FighterAvatar url={f.avatar} name={f.name} />
-                                </div>
-                                <div className="absolute -bottom-6 w-24 flex flex-col items-center"><span className="text-[10px] font-bold text-white drop-shadow-md truncate max-w-full bg-black/40 px-1 rounded mb-0.5">{f.name}</span><div className="w-full h-1.5 bg-gray-800 rounded-full border border-gray-600 overflow-hidden"><div id={`hp-bar-${f.id}`} className="h-full bg-green-500 transition-colors duration-300" style={{ width: '100%' }}></div></div></div>
-                            </div>
-                        ))}
-                    </div>
-
-                    {gameState === 'fighting' && logs.length > 0 && !cinemaMode && (
-                        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-black/80 backdrop-blur px-8 py-3 rounded-full border border-red-500/30 text-yellow-400 font-mono text-lg z-40 whitespace-nowrap shadow-lg animate-bounce">{logs[0]}</div>
-                    )}
-
-                    {gameState === 'winner' && winner && (
-                        <div 
-                            onClick={() => !showSaveOptions && setShowSaveOptions(true)}
-                            className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 animate-fade-in p-4 overflow-y-auto cursor-pointer"
-                        >
-                            {!showSaveOptions ? (
-                                <div className="text-center w-full max-w-md pointer-events-none">
-                                    <div className="relative inline-block mb-6"><Trophy className="w-32 h-32 text-yellow-400 animate-bounce" /></div>
-                                    <h2 className="text-4xl font-black text-white mb-4">VENCEDOR</h2>
-                                    <div className="my-6 relative group">
-                                        <div className="w-48 h-48 rounded-full border-8 border-yellow-400 overflow-hidden mx-auto shadow-[0_0_50px_rgba(250,204,21,0.5)] bg-gray-800">
-                                            <FighterAvatar url={winner.avatar} name={winner.name} />
-                                        </div>
-                                    </div>
-                                    <h3 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-400 mb-8">{winner.name}</h3>
-                                    <p className="text-gray-500 text-sm animate-pulse">Toque em qualquer lugar para continuar</p>
-                                </div>
-                            ) : (
-                                <div onClick={(e) => e.stopPropagation()} className="text-center w-full max-w-md cursor-auto">
-                                    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col gap-3 mb-6 shadow-2xl">
-                                        <h4 className="text-gray-400 text-sm font-bold uppercase mb-2">Salvar Ranking</h4>
-                                        <div className="flex items-center justify-center gap-3 mb-4 bg-gray-900 p-2 rounded">
-                                            <div className="w-10 h-10 rounded-full overflow-hidden border border-yellow-500"><FighterAvatar url={winner.avatar} name={winner.name} /></div>
-                                            <span className="font-bold text-yellow-400">@{winner.name}</span>
-                                        </div>
-                                        <input type="text" value={battleName} onChange={(e) => setBattleName(e.target.value)} className="bg-gray-900 border border-gray-600 rounded p-3 text-white text-center focus:border-pink-500 focus:outline-none" placeholder="Nome da Batalha (ex: Dia 25)" />
-                                        <div className="flex gap-2 mt-2">
-                                            <button onClick={saveRankingToFirebase} disabled={isSaving} className="flex-1 bg-green-600 hover:bg-green-500 text-white p-3 rounded font-bold flex items-center justify-center gap-2 transition hover:scale-105">{isSaving ? "Salvando..." : <><Save size={18}/> Salvar</>}</button>
-                                            <button onClick={copyRankingForBio} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white p-3 rounded font-bold flex items-center justify-center gap-2 transition hover:scale-105"><Copy size={18}/> Bio</button>
-                                        </div>
-                                    </div>
-                                    <button onClick={resetGame} className="bg-white text-black hover:bg-gray-200 px-8 py-3 rounded-full font-bold flex items-center gap-2 mx-auto transition hover:scale-105"><RotateCcw size={20}/> Novo Jogo</button>
-                                </div>
-                            )}
-                        </div>
-                    )}
+                    {gameState === 'ranking_browser' && ( <div className="relative z-50 w-full h-full bg-gray-900 text-white flex flex-col md:flex-row overflow-hidden pt-16"><div className="w-full md:w-1/3 bg-gray-800 border-r border-gray-700 flex flex-col"><div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800 z-10"><h2 className="font-bold text-xl flex items-center gap-2"><List/> Batalhas</h2><button onClick={() => setGameState('setup')} className="text-gray-400 hover:text-white"><Icon path={<><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>}/></button></div><div className="flex-1 overflow-y-auto">{savedBattles.length === 0 && <p className="text-gray-500 text-center mt-10">Nenhuma batalha salva.</p>}{savedBattles.map(b => ( <div key={b.id} onClick={() => setSelectedBattle(b)} className={`p-4 border-b border-gray-700 cursor-pointer hover:bg-gray-700 transition flex justify-between items-center ${selectedBattle?.id === b.id ? 'bg-gray-700 border-l-4 border-l-pink-500' : ''}`}><div><div className="font-bold text-lg flex items-center gap-2">{b.name} {b.id.toString().startsWith('local-') && <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-1 rounded border border-yellow-500/30">LOCAL</span>}</div><div className="text-sm text-gray-400 flex gap-4"><span>🏆 {b.winner}</span><span>{b.date ? new Date(b.date.seconds * 1000).toLocaleDateString() : 'Hoje'}</span></div></div><div className="flex gap-2">{b.id.toString().startsWith('local-') && <button onClick={(e) => publishToCloud(b, e)} className="text-green-400 hover:text-green-300 p-2 rounded-full hover:bg-green-500/10" title="Publicar na Nuvem"><CloudUpload size={18}/></button>}<button onClick={(e) => deleteRanking(b.id, e)} className="text-red-500 hover:text-red-400 p-2 rounded-full hover:bg-red-500/10"><Trash size={18}/></button></div></div> ))}</div></div><div className="flex-1 bg-gray-900 flex flex-col h-full overflow-hidden">{selectedBattle ? ( <> <div className="p-6 border-b border-gray-800 bg-gray-900 z-10 flex flex-col md:flex-row justify-between items-center gap-4"><div><h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-yellow-500">{selectedBattle.name}</h1><p className="text-gray-400">Total de Jogadores: {selectedBattle.ranking.length}</p></div><div className="relative"><input type="text" placeholder="Buscar nome..." className="bg-gray-800 border border-gray-600 rounded-full px-4 py-2 pl-10 focus:outline-none focus:border-pink-500 w-64" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} /><div className="absolute left-3 top-2.5 text-gray-400"><Search size={16}/></div></div></div><div className="flex-1 overflow-y-auto p-4"><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{selectedBattle.ranking.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).map((player) => ( <div key={player.position} className={`flex items-center gap-4 p-3 rounded-lg border ${player.position === 1 ? 'bg-yellow-500/10 border-yellow-500' : 'bg-gray-800 border-gray-700'}`}><div className={`font-bold text-xl w-8 text-center ${player.position === 1 ? 'text-yellow-400' : player.position === 2 ? 'text-gray-300' : player.position === 3 ? 'text-orange-400' : 'text-gray-500'}`}>{player.position}</div><div className="w-12 h-12 rounded-full overflow-hidden border-2 border-gray-600"><FighterAvatar url={player.avatar || DEFAULT_AVATAR} name={player.name} /></div><div className="font-bold truncate text-white">@{player.name}</div></div> ))}</div></div> </> ) : <div className="flex items-center justify-center h-full text-gray-500">Selecione uma batalha para ver o ranking completo.</div>}</div></div> )}
+                    {gameState === 'loading' && ( <div className="relative z-50 flex flex-col items-center justify-center h-full p-4 bg-black/80 backdrop-blur-sm animate-fade-in"><div className="w-full max-w-md bg-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700 text-center"><h2 className="text-2xl font-bold mb-2">Carregando Recursos</h2><p className="text-gray-400 text-sm mb-6">Processando imagens: {loadedCount} / {totalToLoad}</p><div className="w-full h-4 bg-gray-700 rounded-full overflow-hidden mb-8"><div className="h-full bg-gradient-to-r from-pink-500 to-yellow-500 loader-bar" style={{ width: `${loadProgress}%` }}></div></div><button onClick={startBattle} disabled={loadProgress < 100} className={`w-full py-4 rounded-xl font-bold text-xl flex items-center justify-center gap-2 transition transform ${loadProgress >= 100 ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105 shadow-lg text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed grayscale'}`}>{loadProgress < 100 ? <><Loader size={24} /> AGUARDE...</> : <><PlayCircle size={28} /> INICIAR BATALHA</>}</button></div></div> )}
+                    <div ref={arenaRef} className="absolute inset-0 overflow-hidden">{(gameState === 'fighting' || gameState === 'winner') && fighters.map((f) => ( <div key={f.id} id={`fighter-${f.id}`} className="absolute flex flex-col items-center justify-center fighter-container" style={{ width: `${f.size}px`, transform: `translate(${f.x}px, ${f.y}px)`, zIndex: 10, display: f.hp <= 0 ? 'none' : 'flex' }}><div className="relative w-full aspect-square rounded-full border-4 border-white/20 overflow-hidden shadow-xl bg-gray-800"><FighterAvatar url={f.avatar} name={f.name} /></div><div className="absolute -bottom-6 w-24 flex flex-col items-center"><span className="text-[10px] font-bold text-white drop-shadow-md truncate max-w-full bg-black/40 px-1 rounded mb-0.5">{f.name}</span><div className="w-full h-1.5 bg-gray-800 rounded-full border border-gray-600 overflow-hidden"><div id={`hp-bar-${f.id}`} className="h-full bg-green-500 transition-colors duration-300" style={{ width: '100%' }}></div></div></div></div> ))}</div>
+                    {gameState === 'fighting' && logs.length > 0 && !cinemaMode && ( <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-black/80 backdrop-blur px-8 py-3 rounded-full border border-red-500/30 text-yellow-400 font-mono text-lg z-40 whitespace-nowrap shadow-lg animate-bounce">{logs[0]}</div> )}
+                    {gameState === 'winner' && winner && ( <div onClick={() => !showSaveOptions && setShowSaveOptions(true)} className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 animate-fade-in p-4 overflow-y-auto cursor-pointer">{!showSaveOptions ? ( <div className="text-center w-full max-w-md pointer-events-none"><div className="relative inline-block mb-6"><Trophy className="w-32 h-32 text-yellow-400 animate-bounce" /></div><h2 className="text-4xl font-black text-white mb-4">VENCEDOR</h2><div className="my-6 relative group"><div className="w-48 h-48 rounded-full border-8 border-yellow-400 overflow-hidden mx-auto shadow-[0_0_50px_rgba(250,204,21,0.5)] bg-gray-800"><FighterAvatar url={winner.avatar} name={winner.name} /></div></div><h3 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-400 mb-8">{winner.name}</h3><p className="text-gray-500 text-sm animate-pulse">Toque em qualquer lugar para continuar</p></div> ) : ( <div onClick={(e) => e.stopPropagation()} className="text-center w-full max-w-md cursor-auto"><div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col gap-3 mb-6 shadow-2xl"><h4 className="text-gray-400 text-sm font-bold uppercase mb-2">Salvar Ranking</h4><div className="flex items-center justify-center gap-3 mb-4 bg-gray-900 p-2 rounded"><div className="w-10 h-10 rounded-full overflow-hidden border border-yellow-500"><FighterAvatar url={winner.avatar} name={winner.name} /></div><span className="font-bold text-yellow-400">@{winner.name}</span></div><input type="text" value={battleName} onChange={(e) => setBattleName(e.target.value)} className="bg-gray-900 border border-gray-600 rounded p-3 text-white text-center focus:border-pink-500 focus:outline-none" placeholder="Nome da Batalha (ex: Dia 25)" /><div className="flex gap-2 mt-2"><button onClick={saveRankingToFirebase} disabled={isSaving} className="flex-1 bg-green-600 hover:bg-green-500 text-white p-3 rounded font-bold flex items-center justify-center gap-2 transition hover:scale-105">{isSaving ? "Salvando..." : <><Save size={18}/> Salvar</>}</button><button onClick={copyRankingForBio} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white p-3 rounded font-bold flex items-center justify-center gap-2 transition hover:scale-105"><Copy size={18}/> Bio</button></div></div><button onClick={resetGame} className="bg-white text-black hover:bg-gray-200 px-8 py-3 rounded-full font-bold flex items-center gap-2 mx-auto transition hover:scale-105"><RotateCcw size={20}/> Novo Jogo</button></div> )}</div> )}
                 </div>
             );
         }
