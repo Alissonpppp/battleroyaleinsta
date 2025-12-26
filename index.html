@@ -104,19 +104,17 @@
         };
 
         // --- Components ---
+        // Avatar Simplificado: Apenas exibe a URL (que já foi tratada pelo Preloader)
         const FighterAvatar = memo(({ url, name }) => {
-            const [imgSrc, setImgSrc] = useState(DEFAULT_AVATAR);
-            useEffect(() => {
-                if (!url) { setImgSrc(DEFAULT_AVATAR); return; }
-                if (url.startsWith('blob:')) { setImgSrc(url); return; }
-                const encodedUrl = encodeURIComponent(url);
-                const proxyUrl = `https://wsrv.nl/?url=${encodedUrl}&w=150&h=150&fit=cover&output=webp&q=80`;
-                const img = new Image();
-                img.src = proxyUrl;
-                img.onload = () => setImgSrc(proxyUrl);
-                img.onerror = () => setImgSrc(DEFAULT_AVATAR);
-            }, [url]);
-            return <img src={imgSrc} alt={name} className="w-full h-full object-cover" onError={(e) => { e.target.src = DEFAULT_AVATAR; }} />;
+            return (
+                <img 
+                    src={url || DEFAULT_AVATAR} 
+                    alt={name} 
+                    className="w-full h-full object-cover" 
+                    referrerPolicy="no-referrer"
+                    onError={(e) => { e.target.src = DEFAULT_AVATAR; }} 
+                />
+            );
         });
 
         const Icon = ({ path, className, size=24 }) => ( <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{path}</svg> );
