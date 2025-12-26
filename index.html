@@ -12,30 +12,32 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
-    <!-- Babel para compilar JSX no navegador -->
+    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        window.firebaseModules = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, collection, addDoc, getDocs, query, orderBy, serverTimestamp };
+    </script>
     
     <style>
         body { margin: 0; overflow: hidden; background-color: black; }
-        
-        /* Otimização para GPU */
-        .fighter-container {
-            will-change: transform;
-            transform: translateZ(0);
-        }
-
-        /* Animações */
+        .fighter-container { will-change: transform; transform: translateZ(0); }
         @keyframes bounce { 0%, 100% { transform: translateY(-25%); } 50% { transform: translateY(0); } }
         .animate-bounce { animation: bounce 1s infinite; }
         @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
         .animate-fade-in { animation: fade-in 0.5s ease-out; }
         @keyframes pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
         .recording-pulse { animation: pulse-red 2s infinite; }
-        
-        /* Loader Bar */
         .loader-bar { transition: width 0.2s ease-out; }
-
-        ::-webkit-scrollbar { display: none; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
     </style>
 </head>
 <body>
@@ -47,7 +49,31 @@
         const DEFAULT_AVATAR = "https://upload.wikimedia.org/wikipedia/commons/a/ac/Default_pfp.jpg";
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-        // --- Funções de Áudio ---
+        // --- Firebase State Global ---
+        let db = null;
+        let auth = null;
+
+        const initFirebase = async () => {
+            if (window.firebaseInitialized) return;
+            if (!window.firebaseModules) { setTimeout(initFirebase, 100); return; }
+
+            const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, getFirestore } = window.firebaseModules;
+            try {
+                const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                if (window.__initial_auth_token) {
+                    await signInWithCustomToken(auth, window.__initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                window.firebaseInitialized = true;
+                console.log("Firebase Conectado. User:", auth.currentUser?.uid);
+            } catch (e) { console.error("Erro Firebase:", e); }
+        };
+
         const playHitSound = (muted) => {
             if (muted || audioCtx.state === 'suspended') { audioCtx.resume(); if(muted) return; }
             const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
@@ -76,7 +102,22 @@
             });
         };
 
-        // --- Ícones ---
+        // --- Components ---
+        const FighterAvatar = memo(({ url, name }) => {
+            const [imgSrc, setImgSrc] = useState(DEFAULT_AVATAR);
+            useEffect(() => {
+                if (!url) { setImgSrc(DEFAULT_AVATAR); return; }
+                if (url.startsWith('blob:')) { setImgSrc(url); return; }
+                const encodedUrl = encodeURIComponent(url);
+                const proxyUrl = `https://wsrv.nl/?url=${encodedUrl}&w=150&h=150&fit=cover&output=webp&q=80`;
+                const img = new Image();
+                img.src = proxyUrl;
+                img.onload = () => setImgSrc(proxyUrl);
+                img.onerror = () => setImgSrc(DEFAULT_AVATAR);
+            }, [url]);
+            return <img src={imgSrc} alt={name} className="w-full h-full object-cover" onError={(e) => { e.target.src = DEFAULT_AVATAR; }} />;
+        });
+
         const Icon = ({ path, className, size=24 }) => ( <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{path}</svg> );
         const Swords = (p) => <Icon {...p} path={<><path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="m13 19 6-6"/><path d="M16 16 7 7"/><path d="m21 21-6-6"/></>} />;
         const Trophy = (p) => <Icon {...p} path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />;
@@ -91,9 +132,14 @@
         const EyeOff = (p) => <Icon {...p} path={<><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></>} />;
         const PlayCircle = (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></>} />;
         const Loader = (p) => <Icon {...p} path={<path d="M21 12a9 9 0 1 1-6.219-8.56" className="animate-spin" />} />;
+        const List = (p) => <Icon {...p} path={<><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></>} />;
+        const Save = (p) => <Icon {...p} path={<><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></>} />;
+        const Copy = (p) => <Icon {...p} path={<><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>} />;
+        const RotateCcw = (p) => <Icon {...p} path={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />;
+        const Search = (p) => <Icon {...p} path={<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>} />;
 
         function InstagramBattle() {
-            const [gameState, setGameState] = useState('setup'); // setup, loading, fighting, winner
+            const [gameState, setGameState] = useState('setup');
             const [fighters, setFighters] = useState([]);
             const [logs, setLogs] = useState([]);
             const [inputNames, setInputNames] = useState('');
@@ -104,18 +150,27 @@
             const [cinemaMode, setCinemaMode] = useState(false);
             const [localImages, setLocalImages] = useState({});
             
-            // Loading State
             const [loadProgress, setLoadProgress] = useState(0);
             const [totalToLoad, setTotalToLoad] = useState(0);
             const [loadedCount, setLoadedCount] = useState(0);
+
+            const [battleName, setBattleName] = useState('');
+            const [finalRanking, setFinalRanking] = useState([]);
+            const [isSaving, setIsSaving] = useState(false);
+            const [savedBattles, setSavedBattles] = useState([]);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [selectedBattle, setSelectedBattle] = useState(null);
 
             const arenaRef = useRef(null);
             const animationFrame = useRef(null);
             const fightersRef = useRef([]);
             const mediaRecorderRef = useRef(null);
             const chunksRef = useRef([]);
+            const eliminationCounter = useRef(0);
 
-            // --- Física ---
+            useEffect(() => { initFirebase(); }, []);
+
+            // --- Logic ---
             const checkCollision = (f1, f2) => {
                 const dx = (f2.x + f2.size/2) - (f1.x + f1.size/2);
                 const dy = (f2.y + f2.size/2) - (f1.y + f1.size/2);
@@ -134,34 +189,28 @@
 
             const handleImageUpload = (e) => {
                 const files = Array.from(e.target.files);
-                if (files.length === 0) return;
+                if (!files.length) return;
                 const newImages = { ...localImages };
                 files.forEach(file => {
                     const k = file.name.split('.')[0].toLowerCase().trim().replace(/[\s-]/g, '_');
                     const url = URL.createObjectURL(file);
-                    newImages[k] = url;
-                    newImages[file.name.split('.')[0].trim()] = url;
+                    newImages[k] = url; newImages[file.name.split('.')[0].trim()] = url;
                 });
                 setLocalImages(newImages);
                 alert(`${files.length} imagens carregadas!`);
             };
 
-            // --- Etapa 1: Preparação (Parsing) ---
             const handlePrepare = () => {
                 if (audioCtx.state === 'suspended') audioCtx.resume();
                 const rawLines = inputNames.split('\n');
                 const parsed = [];
-
                 rawLines.forEach((line) => {
                     const trimmed = line.trim();
                     if (!trimmed) return;
                     const sep = trimmed.includes(';') ? ';' : ',';
                     let parts = sep === ';' ? trimmed.split(';') : trimmed.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-                    
                     let name = '', avatar = null;
-
                     if (parts.length >= 7) { 
-                        // Formato Exportado
                         if (parts[1]?.toLowerCase().includes('username') || parts[0].toLowerCase().includes('user id')) return;
                         name = parts[1]?.trim().replace(/^"|"$/g, '').replace('@', '');
                         let url = parts[6]?.trim().replace(/^"|"$/g, '');
@@ -177,214 +226,176 @@
                     } else {
                         name = trimmed.replace(/^"|"$/g, '').replace('@', '');
                     }
-
                     const k = name?.toLowerCase().trim().replace(/[\s-]/g, '_');
                     if (localImages[name] || localImages[k]) avatar = localImages[name] || localImages[k];
-
                     if (name) parsed.push({ name, rawAvatar: avatar });
                 });
-                
                 if (parsed.length < 2) { alert("Mínimo 2 competidores!"); return; }
-
-                setFighters(parsed); // Temporário
-                setTotalToLoad(parsed.length);
-                setLoadedCount(0);
-                setLoadProgress(0);
-                setGameState('loading');
+                setFighters(parsed); setTotalToLoad(parsed.length); setLoadedCount(0); setLoadProgress(0); setGameState('loading'); eliminationCounter.current = 0;
             };
 
-            // --- Etapa 2: Carregamento de Imagens (Preloader) ---
             useEffect(() => {
                 if (gameState === 'loading') {
                     let loaded = 0;
-                    const processedFighters = [];
-
-                    // Função auxiliar para carregar imagem
                     const preloadImage = (fighter) => {
                         return new Promise((resolve) => {
                             const done = (finalUrl) => {
-                                loaded++;
-                                setLoadedCount(loaded);
-                                setLoadProgress((loaded / fighters.length) * 100);
+                                loaded++; setLoadedCount(loaded); setLoadProgress((loaded / fighters.length) * 100);
                                 resolve({ ...fighter, finalAvatar: finalUrl });
                             };
-
-                            if (!fighter.rawAvatar) {
-                                done(DEFAULT_AVATAR);
-                                return;
-                            }
-
-                            if (fighter.rawAvatar.startsWith('blob:')) {
-                                done(fighter.rawAvatar);
-                                return;
-                            }
-
-                            // 1. Tenta Original
-                            const img = new Image();
-                            img.src = fighter.rawAvatar;
+                            if (!fighter.rawAvatar || fighter.rawAvatar.startsWith('blob:')) { done(fighter.rawAvatar || DEFAULT_AVATAR); return; }
+                            const img = new Image(); img.src = fighter.rawAvatar;
                             img.onload = () => done(fighter.rawAvatar);
                             img.onerror = () => {
-                                // 2. Tenta Proxy
                                 const encoded = encodeURIComponent(fighter.rawAvatar);
                                 const proxyUrl = `https://wsrv.nl/?url=${encoded}&w=150&h=150&fit=cover&output=webp&q=80`;
-                                const imgProxy = new Image();
-                                imgProxy.src = proxyUrl;
+                                const imgProxy = new Image(); imgProxy.src = proxyUrl;
                                 imgProxy.onload = () => done(proxyUrl);
-                                imgProxy.onerror = () => {
-                                    // 3. Falhou tudo -> Default
-                                    done(DEFAULT_AVATAR);
-                                };
+                                imgProxy.onerror = () => done(DEFAULT_AVATAR);
                             };
                         });
                     };
-
-                    // Inicia carregamento paralelo
                     Promise.all(fighters.map(f => preloadImage(f))).then((results) => {
-                        // Inicializa posições para a batalha
                         const currentW = arenaRef.current ? arenaRef.current.offsetWidth : window.innerWidth;
                         const currentH = arenaRef.current ? arenaRef.current.offsetHeight : window.innerHeight;
-                        
                         const readyFighters = results.map((f, i) => ({
-                            id: i,
-                            name: f.name,
-                            avatar: f.finalAvatar, // URL GARANTIDA E CARREGADA
-                            hp: 100,
-                            maxHp: 100,
-                            isHit: false,
-                            hitCooldown: 0,
-                            x: Math.random() * (currentW - 80),
-                            y: Math.random() * (currentH - 80),
-                            vx: (Math.random() - 0.5) * 8,
-                            vy: (Math.random() - 0.5) * 8,
-                            size: 60
+                            id: i, name: f.name, avatar: f.finalAvatar, hp: 100, maxHp: 100, isHit: false, hitCooldown: 0,
+                            x: Math.random() * (currentW - 80), y: Math.random() * (currentH - 80),
+                            vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8, size: 60, eliminationOrder: -1
                         }));
-                        
-                        fightersRef.current = readyFighters;
-                        setFighters(readyFighters); // Atualiza estado visual
-                        // Não muda gameState automaticamente, espera o usuário clicar Play
+                        fightersRef.current = readyFighters; setFighters(readyFighters);
                     });
                 }
             }, [gameState]);
 
-            // --- Etapa 3: Iniciar Batalha ---
-            const startBattle = () => {
-                setLogs(["A ARENA ESTÁ ABERTA!"]);
-                setGameState('fighting');
-            };
+            const startBattle = () => { setLogs(["A ARENA ESTÁ ABERTA!"]); setGameState('fighting'); };
+            const loadDemo = () => { setInputNames(["neymarjr, https://github.com/shadcn.png", "anitta, https://github.com/vercel.png", "messi, https://github.com/facebook.png", "cr7, https://github.com/google.png", "bob_esponja", "patrick", "lula_molusco", "sandy" ].join('\n')); };
 
-            const loadDemo = () => {
-                const demoData = [ "neymarjr, https://github.com/shadcn.png", "anitta, https://github.com/vercel.png", "messi, https://github.com/facebook.png", "cr7, https://github.com/google.png", "bob_esponja", "patrick", "lula_molusco", "sandy" ];
-                setInputNames(demoData.join('\n'));
-            };
-
-            // Loop de Animação Otimizado
             const animate = useCallback(() => {
                 if (gameState !== 'fighting') return;
-
                 const currentW = arenaRef.current ? arenaRef.current.offsetWidth : window.innerWidth;
                 const currentH = arenaRef.current ? arenaRef.current.offsetHeight : window.innerHeight;
                 const allFighters = fightersRef.current;
-                
-                let aliveCount = 0;
-                let potentialWinner = null;
+                let aliveCount = 0; let potentialWinner = null;
 
                 allFighters.forEach(f => {
                     if (f.hp > 0) {
-                        aliveCount++;
-                        potentialWinner = f;
-                        
-                        f.x += f.vx * speed;
-                        f.y += f.vy * speed;
+                        aliveCount++; potentialWinner = f;
+                        f.x += f.vx * speed; f.y += f.vy * speed;
                         if (f.hitCooldown > 0) f.hitCooldown--;
-                        
                         if (f.x <= 0) { f.x = 0; f.vx *= -1; }
                         if (f.x >= currentW - f.size) { f.x = currentW - f.size; f.vx *= -1; }
                         if (f.y <= 0) { f.y = 0; f.vy *= -1; }
                         if (f.y >= currentH - f.size) { f.y = currentH - f.size; f.vy *= -1; }
-
                         const el = document.getElementById(`fighter-${f.id}`);
                         if (el) el.style.transform = `translate(${f.x}px, ${f.y}px)`;
                     }
                 });
 
                 for (let i = 0; i < allFighters.length; i++) {
-                    const f1 = allFighters[i];
-                    if (f1.hp <= 0) continue;
+                    const f1 = allFighters[i]; if (f1.hp <= 0) continue;
                     for (let j = i + 1; j < allFighters.length; j++) {
-                        const f2 = allFighters[j];
-                        if (f2.hp <= 0) continue;
-
+                        const f2 = allFighters[j]; if (f2.hp <= 0) continue;
                         const { collided, dx, dy, distance } = checkCollision(f1, f2);
                         if (collided) {
                             const overlap = (f1.size - distance) / 2;
-                            const normalX = dx / distance;
-                            const normalY = dy / distance;
-                            f1.x -= overlap * normalX; f1.y -= overlap * normalY;
-                            f2.x += overlap * normalX; f2.y += overlap * normalY;
-                            
+                            const normalX = dx / distance; const normalY = dy / distance;
+                            f1.x -= overlap * normalX; f1.y -= overlap * normalY; f2.x += overlap * normalX; f2.y += overlap * normalY;
                             const tempVx = f1.vx; const tempVy = f1.vy;
                             f1.vx = f2.vx + (Math.random()-0.5); f1.vy = f2.vy + (Math.random()-0.5);
                             f2.vx = tempVx + (Math.random()-0.5); f2.vy = tempVy + (Math.random()-0.5);
 
                             if (f1.hitCooldown <= 0 && f2.hitCooldown <= 0) {
-                                const dmg = Math.floor(Math.random() * 15) + 5;
-                                const roll = Math.random();
-                                let msg = "";
+                                const dmg = Math.floor(Math.random() * 15) + 5; const roll = Math.random(); let msg = "";
                                 if (roll < 0.45) {
-                                    f2.hp = Math.max(0, f2.hp - dmg);
-                                    msg = `@${f1.name} hit @${f2.name} (-${dmg})`;
-                                    playHitSound(isMuted);
-                                    const hpBar = document.getElementById(`hp-bar-${f2.id}`);
-                                    if(hpBar) { hpBar.style.width = `${f2.hp}%`; if(f2.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
-                                    if (f2.hp <= 0) {
-                                        const elF2 = document.getElementById(`fighter-${f2.id}`);
-                                        if(elF2) { elF2.style.opacity = '0.4'; elF2.style.filter = 'grayscale(100%)'; elF2.style.zIndex = '0'; }
+                                    f2.hp = Math.max(0, f2.hp - dmg); msg = `@${f1.name} hit @${f2.name} (-${dmg})`; playHitSound(isMuted);
+                                    const hpBar = document.getElementById(`hp-bar-${f2.id}`); if(hpBar) { hpBar.style.width = `${f2.hp}%`; if(f2.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
+                                    // Remove ghost logic: Hide immediately
+                                    if (f2.hp <= 0 && f2.eliminationOrder === -1) { 
+                                        f2.eliminationOrder = eliminationCounter.current++; 
+                                        const elF2 = document.getElementById(`fighter-${f2.id}`); 
+                                        if(elF2) { elF2.style.display = 'none'; } 
                                     }
                                 } else if (roll < 0.90) {
-                                    f1.hp = Math.max(0, f1.hp - dmg);
-                                    msg = `@${f2.name} hit @${f1.name} (-${dmg})`;
-                                    playHitSound(isMuted);
-                                    const hpBar = document.getElementById(`hp-bar-${f1.id}`);
-                                    if(hpBar) { hpBar.style.width = `${f1.hp}%`; if(f1.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
-                                    if (f1.hp <= 0) {
-                                        const elF1 = document.getElementById(`fighter-${f1.id}`);
-                                        if(elF1) { elF1.style.opacity = '0.4'; elF1.style.filter = 'grayscale(100%)'; elF1.style.zIndex = '0'; }
+                                    f1.hp = Math.max(0, f1.hp - dmg); msg = `@${f2.name} hit @${f1.name} (-${dmg})`; playHitSound(isMuted);
+                                    const hpBar = document.getElementById(`hp-bar-${f1.id}`); if(hpBar) { hpBar.style.width = `${f1.hp}%`; if(f1.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
+                                    // Remove ghost logic: Hide immediately
+                                    if (f1.hp <= 0 && f1.eliminationOrder === -1) { 
+                                        f1.eliminationOrder = eliminationCounter.current++; 
+                                        const elF1 = document.getElementById(`fighter-${f1.id}`); 
+                                        if(elF1) { elF1.style.display = 'none'; } 
                                     }
                                 } else {
-                                    const half = Math.floor(dmg/2);
-                                    f1.hp = Math.max(0, f1.hp - half); f2.hp = Math.max(0, f2.hp - half);
-                                    msg = "CHOQUE!";
-                                    playHitSound(isMuted);
+                                    const half = Math.floor(dmg/2); f1.hp = Math.max(0, f1.hp - half); f2.hp = Math.max(0, f2.hp - half); msg = "CHOQUE!"; playHitSound(isMuted);
                                     const hp1 = document.getElementById(`hp-bar-${f1.id}`); if(hp1) hp1.style.width = `${f1.hp}%`;
                                     const hp2 = document.getElementById(`hp-bar-${f2.id}`); if(hp2) hp2.style.width = `${f2.hp}%`;
                                 }
-                                f1.hitCooldown = 30; f2.hitCooldown = 30;
-                                if (msg) setLogs(prev => [msg, ...prev.slice(0, 2)]);
+                                f1.hitCooldown = 30; f2.hitCooldown = 30; if (msg) setLogs(prev => [msg, ...prev.slice(0, 2)]);
                             }
                         }
                     }
                 }
 
                 if (aliveCount <= 1 && allFighters.length > 1 && potentialWinner) {
+                    potentialWinner.eliminationOrder = eliminationCounter.current;
                     setWinner(potentialWinner);
                     setGameState('winner');
                     playWinSound(isMuted);
+                    const sorted = [...allFighters].sort((a, b) => b.eliminationOrder - a.eliminationOrder);
+                    setFinalRanking(sorted);
+                    setBattleName(`Batalha ${new Date().toLocaleDateString('pt-BR')}`);
                     return;
                 }
                 animationFrame.current = requestAnimationFrame(animate);
             }, [gameState, speed, isMuted]);
 
-            useEffect(() => {
-                if (gameState === 'fighting') animationFrame.current = requestAnimationFrame(animate);
-                return () => cancelAnimationFrame(animationFrame.current);
-            }, [gameState, animate]);
+            useEffect(() => { if (gameState === 'fighting') animationFrame.current = requestAnimationFrame(animate); return () => cancelAnimationFrame(animationFrame.current); }, [gameState, animate]);
 
-            const resetGame = () => {
-                setGameState('setup');
-                setWinner(null);
-                setLogs([]);
-                setFighters([]);
-                fightersRef.current = [];
+            const resetGame = () => { setGameState('setup'); setWinner(null); setLogs([]); setFighters([]); fightersRef.current = []; setFinalRanking([]); setIsSaving(false); };
+
+            const saveRankingToFirebase = async () => {
+                if (!db || isSaving) return;
+                
+                // Extra Security Check
+                if (!auth.currentUser) {
+                    alert("Aguarde a autenticação do sistema...");
+                    return;
+                }
+
+                setIsSaving(true);
+                try {
+                    const { collection, addDoc, serverTimestamp } = window.firebaseModules;
+                    
+                    const appId = window.__app_id || 'default-app-id';
+                    const userId = auth.currentUser.uid;
+
+                    // Write to PUBLIC data as requested
+                    const simpleRanking = finalRanking.map((f, index) => ({ position: index + 1, name: f.name, avatar: f.avatar }));
+                    
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'battles'), { 
+                        name: battleName, 
+                        date: serverTimestamp(), 
+                        winner: winner.name, 
+                        ranking: simpleRanking,
+                        createdBy: userId
+                    });
+                    
+                    alert("Ranking salvo com sucesso!");
+                } catch (e) { 
+                    console.error("Erro ao salvar:", e); 
+                    alert(`Erro ao salvar: ${e.message}`); 
+                }
+                setIsSaving(false);
+            };
+
+            const copyRankingForBio = () => {
+                const top5 = finalRanking.slice(0, 5);
+                let text = `👑 Batalha Royale: ${battleName}\n\n`;
+                const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+                top5.forEach((f, i) => { text += `${medals[i] || '🏅'} @${f.name}\n`; });
+                text += `\n... e mais ${finalRanking.length - 5} guerreiros!`;
+                navigator.clipboard.writeText(text);
+                alert("Copiado!");
             };
 
             const toggleRecording = async () => {
@@ -392,48 +403,49 @@
                     try {
                         const stream = await navigator.mediaDevices.getDisplayMedia({ video: { mediaSource: 'screen', frameRate: 30 }, audio: true, preferCurrentTab: true });
                         const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-                        mediaRecorderRef.current = mediaRecorder;
-                        chunksRef.current = [];
+                        mediaRecorderRef.current = mediaRecorder; chunksRef.current = [];
                         mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
                         mediaRecorder.onstop = () => {
                             const blob = new Blob(chunksRef.current, { type: "video/webm" });
                             const url = URL.createObjectURL(blob);
-                            const a = document.createElement("a"); a.href = url; a.download = `bate-bate-royale-${Date.now()}.webm`; a.click();
-                            URL.revokeObjectURL(url);
-                            setIsRecording(false);
-                            stream.getTracks().forEach(t => t.stop());
+                            const a = document.createElement("a"); a.href = url; a.download = `bate-bate-${Date.now()}.webm`; a.click();
+                            URL.revokeObjectURL(url); setIsRecording(false); stream.getTracks().forEach(t => t.stop());
                         };
-                        mediaRecorder.start();
-                        setIsRecording(true);
+                        mediaRecorder.start(); setIsRecording(true);
                         stream.getVideoTracks()[0].onended = () => { if (mediaRecorder.state !== 'inactive') mediaRecorder.stop(); };
                     } catch (err) { console.error(err); }
                 } else { if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current.stop(); }
             };
 
-            return (
-                <div className="fixed inset-0 bg-black text-white font-sans overflow-hidden select-none">
-                    
-                    {/* Background Grid */}
-                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'linear-gradient(#333 1px, transparent 1px), linear-gradient(90deg, #333 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
+            const openRankingBrowser = async () => {
+                setGameState('ranking_browser');
+                if (!db) return;
+                const { collection, getDocs, query, orderBy } = window.firebaseModules;
+                try {
+                    const appId = window.__app_id || 'default-app-id';
+                    // Using Public path correctly without orderBy if permissions fail
+                    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'battles'));
+                    const snapshot = await getDocs(q);
+                    const battles = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    // Sort in memory
+                    battles.sort((a,b) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
+                    setSavedBattles(battles);
+                } catch (e) { console.error(e); }
+            };
 
-                    {/* Header */}
+            return (
+                <div className="fixed inset-0 bg-black text-white font-sans overflow-hidden select-none flex flex-col">
+                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'linear-gradient(#333 1px, transparent 1px), linear-gradient(90deg, #333 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
+                    
                     <div className="absolute top-0 left-0 right-0 z-50 p-4 pointer-events-none flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent">
                         <div>
-                            <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-yellow-500 drop-shadow-md flex items-center gap-2">
-                                <Swords className="text-white" size={24} /> Bate-Bate Royale
-                            </h1>
-                            {gameState === 'fighting' && (
-                                <div className="text-green-400 font-mono text-sm mt-1 bg-black/50 inline-block px-2 rounded backdrop-blur">
-                                    <span className="font-bold">Vivos:</span> <span id="alive-count">{fighters.filter(f => f.hp > 0).length}</span>
-                                </div>
-                            )}
+                            <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-yellow-500 drop-shadow-md flex items-center gap-2"><Swords className="text-white" size={24} /> Bate-Bate Royale</h1>
+                            {gameState === 'fighting' && <div className="text-green-400 font-mono text-sm mt-1 bg-black/50 inline-block px-2 rounded backdrop-blur"><span className="font-bold">Vivos:</span> {fighters.filter(f => f.hp > 0).length}</div>}
                         </div>
-
-                        {/* Controls Group */}
-                        {!cinemaMode && (
+                        {!cinemaMode && gameState !== 'ranking_browser' && (
                             <div className="flex gap-2 pointer-events-auto items-center animate-fade-in">
-                                <button onClick={toggleRecording} className={`p-2 rounded-lg transition border ${isRecording ? 'bg-red-600 border-red-500 text-white recording-pulse' : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white'}`} title="Gravar Tela">{isRecording ? <Square size={20} fill="currentColor" /> : <Video size={20} />}</button>
-                                <button onClick={() => setIsMuted(!isMuted)} className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white transition" title="Som">{isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
+                                <button onClick={toggleRecording} className={`p-2 rounded-lg transition border ${isRecording ? 'bg-red-600 border-red-500 text-white recording-pulse' : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white'}`}><Video size={20} /></button>
+                                <button onClick={() => setIsMuted(!isMuted)} className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white transition">{isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
                                 <button onClick={() => setCinemaMode(true)} className="bg-purple-600 p-2 rounded-lg text-white hover:bg-purple-500 transition" title="Modo Cinema"><EyeOff size={20} /></button>
                                 {gameState === 'fighting' && (
                                     <div className="bg-gray-800 rounded-lg p-1 flex items-center gap-2 px-2 h-full">
@@ -444,29 +456,19 @@
                                 )}
                             </div>
                         )}
-                        {cinemaMode && (
-                            <button onClick={() => setCinemaMode(false)} className="pointer-events-auto bg-gray-800/50 hover:bg-gray-700 p-2 rounded-full text-gray-400 transition" title="Sair do Modo Cinema"><Eye size={20} /></button>
-                        )}
+                        {cinemaMode && <button onClick={() => setCinemaMode(false)} className="pointer-events-auto bg-gray-800/50 hover:bg-gray-700 p-2 rounded-full text-gray-400 transition"><Eye size={20} /></button>}
                     </div>
 
-                    {/* Setup Screen */}
                     {gameState === 'setup' && (
-                        <div className="relative z-50 flex items-center justify-center h-full p-4">
+                        <div className="relative z-50 flex items-center justify-center h-full p-4 overflow-y-auto">
                             <div className="w-full max-w-2xl bg-gray-900/90 backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-gray-700 flex flex-col gap-4">
-                                <h2 className="text-2xl font-bold text-center">Configurar Arena</h2>
+                                <div className="flex justify-between items-center">
+                                    <h2 className="text-2xl font-bold">Configurar Arena</h2>
+                                    <button onClick={openRankingBrowser} className="text-sm bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded text-yellow-400 border border-yellow-500/30 flex items-center gap-2"><List size={14}/> Ver Rankings Salvos</button>
+                                </div>
                                 <div className="flex gap-4 w-full">
-                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-pink-500 transition relative">
-                                        <label className="flex flex-col items-center cursor-pointer group h-full justify-center">
-                                            <div className="flex items-center gap-2 text-pink-400 group-hover:text-pink-300 transition"><FileUp size={24}/><span className="font-bold text-sm">Lista (.txt/.csv)</span></div>
-                                            <input type="file" accept=".txt,.csv" onChange={handleFileUpload} className="hidden"/>
-                                        </label>
-                                    </div>
-                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-green-500 transition relative">
-                                        <label className="flex flex-col items-center cursor-pointer group h-full justify-center">
-                                            <div className="flex items-center gap-2 text-green-400 group-hover:text-green-300 transition"><ImagePlus size={24}/><span className="font-bold text-sm">Fotos Locais</span></div>
-                                            <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden"/>
-                                        </label>
-                                    </div>
+                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-pink-500 transition relative"><label className="flex flex-col items-center cursor-pointer group h-full justify-center"><div className="flex items-center gap-2 text-pink-400 group-hover:text-pink-300 transition"><FileUp size={24}/><span className="font-bold text-sm">Lista (.txt/.csv)</span></div><input type="file" accept=".txt,.csv" onChange={handleFileUpload} className="hidden"/></label></div>
+                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-green-500 transition relative"><label className="flex flex-col items-center cursor-pointer group h-full justify-center"><div className="flex items-center gap-2 text-green-400 group-hover:text-green-300 transition"><ImagePlus size={24}/><span className="font-bold text-sm">Fotos Locais</span></div><input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden"/></label></div>
                                 </div>
                                 <textarea value={inputNames} onChange={(e) => setInputNames(e.target.value)} className="w-full h-40 bg-black/50 border border-gray-600 rounded-lg p-3 text-white outline-none font-mono text-xs resize-none" placeholder={`@usuario1\n@usuario2, https://site.com/foto.jpg`}/>
                                 <div className="flex gap-4">
@@ -477,72 +479,103 @@
                         </div>
                     )}
 
-                    {/* Loading Screen */}
+                    {gameState === 'ranking_browser' && (
+                        <div className="relative z-50 w-full h-full bg-gray-900 text-white flex flex-col md:flex-row overflow-hidden pt-16">
+                            <div className="w-full md:w-1/3 bg-gray-800 border-r border-gray-700 flex flex-col">
+                                <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800 z-10">
+                                    <h2 className="font-bold text-xl flex items-center gap-2"><List/> Batalhas</h2>
+                                    <button onClick={() => setGameState('setup')} className="text-gray-400 hover:text-white"><Icon path={<><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>}/></button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto">
+                                    {savedBattles.length === 0 && <p className="text-gray-500 text-center mt-10">Nenhuma batalha salva.</p>}
+                                    {savedBattles.map(b => (
+                                        <div 
+                                            key={b.id} 
+                                            onClick={() => setSelectedBattle(b)}
+                                            className={`p-4 border-b border-gray-700 cursor-pointer hover:bg-gray-700 transition ${selectedBattle?.id === b.id ? 'bg-gray-700 border-l-4 border-l-pink-500' : ''}`}
+                                        >
+                                            <div className="font-bold text-lg">{b.name}</div>
+                                            <div className="text-sm text-gray-400 flex justify-between">
+                                                <span>🏆 {b.winner}</span>
+                                                <span>{b.date ? new Date(b.date.seconds * 1000).toLocaleDateString() : 'Hoje'}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="flex-1 bg-gray-900 flex flex-col h-full overflow-hidden">
+                                {selectedBattle ? (
+                                    <>
+                                        <div className="p-6 border-b border-gray-800 bg-gray-900 z-10 flex flex-col md:flex-row justify-between items-center gap-4">
+                                            <div>
+                                                <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-yellow-500">{selectedBattle.name}</h1>
+                                                <p className="text-gray-400">Total de Jogadores: {selectedBattle.ranking.length}</p>
+                                            </div>
+                                            <div className="relative">
+                                                <input type="text" placeholder="Buscar nome..." className="bg-gray-800 border border-gray-600 rounded-full px-4 py-2 pl-10 focus:outline-none focus:border-pink-500 w-64" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                                                <div className="absolute left-3 top-2.5 text-gray-400"><Search size={16}/></div>
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-4">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                {selectedBattle.ranking.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).map((player) => (
+                                                    <div key={player.position} className={`flex items-center gap-4 p-3 rounded-lg border ${player.position === 1 ? 'bg-yellow-500/10 border-yellow-500' : 'bg-gray-800 border-gray-700'}`}>
+                                                        <div className={`font-bold text-xl w-8 text-center ${player.position === 1 ? 'text-yellow-400' : player.position === 2 ? 'text-gray-300' : player.position === 3 ? 'text-orange-400' : 'text-gray-500'}`}>{player.position}</div>
+                                                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-gray-600"><img src={player.avatar || DEFAULT_AVATAR} className="w-full h-full object-cover" onError={(e) => e.target.src = DEFAULT_AVATAR}/></div>
+                                                        <div className="font-bold truncate text-white">@{player.name}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : <div className="flex items-center justify-center h-full text-gray-500">Selecione uma batalha.</div>}
+                            </div>
+                        </div>
+                    )}
+
                     {gameState === 'loading' && (
                         <div className="relative z-50 flex flex-col items-center justify-center h-full p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
                             <div className="w-full max-w-md bg-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700 text-center">
                                 <h2 className="text-2xl font-bold mb-2">Carregando Recursos</h2>
                                 <p className="text-gray-400 text-sm mb-6">Processando imagens: {loadedCount} / {totalToLoad}</p>
-                                
-                                {/* Progress Bar */}
-                                <div className="w-full h-4 bg-gray-700 rounded-full overflow-hidden mb-8">
-                                    <div className="h-full bg-gradient-to-r from-pink-500 to-yellow-500 loader-bar" style={{ width: `${loadProgress}%` }}></div>
-                                </div>
-
-                                <button 
-                                    onClick={startBattle} 
-                                    disabled={loadProgress < 100}
-                                    className={`w-full py-4 rounded-xl font-bold text-xl flex items-center justify-center gap-2 transition transform 
-                                        ${loadProgress >= 100 
-                                            ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105 shadow-lg text-white cursor-pointer' 
-                                            : 'bg-gray-700 text-gray-500 cursor-not-allowed grayscale'}`}
-                                >
-                                    {loadProgress < 100 ? (
-                                        <> <Loader size={24} /> AGUARDE... </>
-                                    ) : (
-                                        <> <PlayCircle size={28} /> INICIAR BATALHA </>
-                                    )}
+                                <div className="w-full h-4 bg-gray-700 rounded-full overflow-hidden mb-8"><div className="h-full bg-gradient-to-r from-pink-500 to-yellow-500 loader-bar" style={{ width: `${loadProgress}%` }}></div></div>
+                                <button onClick={startBattle} disabled={loadProgress < 100} className={`w-full py-4 rounded-xl font-bold text-xl flex items-center justify-center gap-2 transition transform ${loadProgress >= 100 ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105 shadow-lg text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed grayscale'}`}>
+                                    {loadProgress < 100 ? <><Loader size={24} /> AGUARDE...</> : <><PlayCircle size={28} /> INICIAR BATALHA</>}
                                 </button>
                             </div>
                         </div>
                     )}
 
-                    {/* Arena */}
                     <div ref={arenaRef} className="absolute inset-0 overflow-hidden">
                         {(gameState === 'fighting' || gameState === 'winner') && fighters.map((f) => (
                             <div key={f.id} id={`fighter-${f.id}`} className="absolute flex flex-col items-center justify-center fighter-container" style={{ width: `${f.size}px`, transform: `translate(${f.x}px, ${f.y}px)`, zIndex: 10 }}>
                                 <div className="relative w-full aspect-square rounded-full border-4 border-white/20 overflow-hidden shadow-xl bg-gray-800">
                                     <img src={f.avatar} alt={f.name} className="w-full h-full object-cover" />
                                 </div>
-                                <div className="absolute -bottom-6 w-24 flex flex-col items-center">
-                                    <span className="text-[10px] font-bold text-white drop-shadow-md truncate max-w-full bg-black/40 px-1 rounded mb-0.5">{f.name}</span>
-                                    <div className="w-full h-1.5 bg-gray-800 rounded-full border border-gray-600 overflow-hidden">
-                                        <div id={`hp-bar-${f.id}`} className="h-full bg-green-500 transition-colors duration-300" style={{ width: '100%' }}></div>
-                                    </div>
-                                </div>
+                                <div className="absolute -bottom-6 w-24 flex flex-col items-center"><span className="text-[10px] font-bold text-white drop-shadow-md truncate max-w-full bg-black/40 px-1 rounded mb-0.5">{f.name}</span><div className="w-full h-1.5 bg-gray-800 rounded-full border border-gray-600 overflow-hidden"><div id={`hp-bar-${f.id}`} className="h-full bg-green-500 transition-colors duration-300" style={{ width: '100%' }}></div></div></div>
                             </div>
                         ))}
                     </div>
 
-                    {/* Logs */}
                     {gameState === 'fighting' && logs.length > 0 && !cinemaMode && (
-                        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-black/80 backdrop-blur px-8 py-3 rounded-full border border-red-500/30 text-yellow-400 font-mono text-lg z-40 whitespace-nowrap shadow-lg animate-bounce">
-                            {logs[0]}
-                        </div>
+                        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-black/80 backdrop-blur px-8 py-3 rounded-full border border-red-500/30 text-yellow-400 font-mono text-lg z-40 whitespace-nowrap shadow-lg animate-bounce">{logs[0]}</div>
                     )}
 
-                    {/* Winner */}
                     {gameState === 'winner' && winner && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 animate-fade-in p-4">
-                            <div className="text-center">
-                                <div className="relative inline-block mb-6"><Trophy className="w-32 h-32 text-yellow-400 animate-bounce" /></div>
-                                <h2 className="text-4xl font-black text-white mb-2">VENCEDOR</h2>
-                                <div className="my-8 relative group">
-                                    <div className="w-48 h-48 rounded-full border-4 border-yellow-400 overflow-hidden mx-auto shadow-xl bg-gray-800">
-                                        <img src={winner.avatar} alt={winner.name} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 animate-fade-in p-4 overflow-y-auto">
+                            <div className="text-center w-full max-w-md">
+                                <div className="relative inline-block mb-4"><Trophy className="w-24 h-24 text-yellow-400 animate-bounce" /></div>
+                                <h2 className="text-3xl font-black text-white mb-2">VENCEDOR</h2>
+                                <div className="my-4 relative group"><div className="w-32 h-32 rounded-full border-4 border-yellow-400 overflow-hidden mx-auto shadow-xl bg-gray-800"><img src={winner.avatar} alt={winner.name} className="w-full h-full object-cover" /></div></div>
+                                <h3 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-400 mb-6">{winner.name}</h3>
+                                <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col gap-3 mb-6">
+                                    <h4 className="text-gray-400 text-sm font-bold uppercase">Salvar Ranking</h4>
+                                    <input type="text" value={battleName} onChange={(e) => setBattleName(e.target.value)} className="bg-gray-900 border border-gray-600 rounded p-2 text-white text-center focus:border-pink-500 focus:outline-none" placeholder="Nome (ex: Dia 25)" />
+                                    <div className="flex gap-2">
+                                        <button onClick={saveRankingToFirebase} disabled={isSaving} className="flex-1 bg-green-600 hover:bg-green-500 text-white p-2 rounded font-bold flex items-center justify-center gap-2">{isSaving ? "Salvando..." : <><Save size={18}/> Salvar</>}</button>
+                                        <button onClick={copyRankingForBio} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white p-2 rounded font-bold flex items-center justify-center gap-2"><Copy size={18}/> Copiar Bio</button>
                                     </div>
                                 </div>
-                                <h3 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-400 mb-8">{winner.name}</h3>
                                 <button onClick={resetGame} className="bg-white text-black hover:bg-gray-200 px-8 py-3 rounded-full font-bold flex items-center gap-2 mx-auto"><RotateCcw size={20}/> Novo Jogo</button>
                             </div>
                         </div>
