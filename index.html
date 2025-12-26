@@ -191,21 +191,40 @@
                     const trimmed = line.trim();
                     if (!trimmed) return;
                     
-                    const separator = trimmed.includes(',') ? ',' : trimmed.includes(';') ? ';' : null;
+                    // Regex para dividir CSV respeitando aspas (caso nome ou algo tenha vírgula)
+                    // Ou split simples se não houver aspas complexas
+                    const parts = trimmed.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
                     
-                    let name = trimmed;
+                    let name = '';
                     let customImage = null;
 
-                    if (separator) {
-                        const parts = trimmed.split(separator);
-                        name = parts[0].trim().replace('@', '');
-                        if (parts.length > 1) {
-                             customImage = parts.slice(1).join(separator).trim().replace(/['"]/g, "");
+                    // Lógica para detectar o formato de 7 colunas do export
+                    // Colunas esperadas: user id, username, full name, followed by you, is verified, profile url, avatar url
+                    // index 1: username
+                    // index 6: avatar url
+                    if (parts.length >= 7) {
+                        const colUsername = parts[1].trim().replace(/^"|"$/g, '');
+                        const colAvatar = parts[6].trim().replace(/^"|"$/g, '');
+
+                        // Ignora a linha de cabeçalho se for detectada
+                        if (colUsername.toLowerCase() === 'username' || parts[0].toLowerCase().includes('user id')) {
+                            return;
                         }
-                    } else {
-                        name = trimmed.replace('@', '');
+
+                        name = colUsername.replace('@', '');
+                        customImage = colAvatar;
+                    } 
+                    // Fallback para formato simples "nome, imagem"
+                    else if (parts.length >= 2) {
+                        name = parts[0].trim().replace(/^"|"$/g, '').replace('@', '');
+                        customImage = parts.slice(1).join(',').trim().replace(/^"|"$/g, '');
+                    } 
+                    // Fallback para apenas nome
+                    else {
+                        name = trimmed.replace(/^"|"$/g, '').replace('@', '');
                     }
 
+                    // Tenta encontrar imagem local correspondente
                     const nameKey = name.toLowerCase().trim().replace(/[\s-]/g, '_');
                     if (localImages[name] || localImages[nameKey]) {
                         customImage = localImages[name] || localImages[nameKey];
