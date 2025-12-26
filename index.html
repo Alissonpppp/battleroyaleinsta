@@ -48,7 +48,6 @@
         const { useState, useEffect, useRef, useCallback } = React;
 
         // --- Gerenciador de Áudio (Sintetizador Web Audio API) ---
-        // Cria sons na hora sem precisar de arquivos externos
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
         const playHitSound = (muted) => {
@@ -65,7 +64,6 @@
             gain.connect(audioCtx.destination);
             
             osc.type = 'square';
-            // Frequência aleatória para variar o som
             const freq = 100 + Math.random() * 50; 
             osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.1);
@@ -91,7 +89,6 @@
                 gain.connect(audioCtx.destination);
                 
                 osc.type = 'triangle';
-                // Notas: C, E, G, C (Acorde Maior)
                 const notes = [523.25, 659.25, 783.99, 1046.50];
                 
                 osc.frequency.setValueAtTime(notes[i], now + offset);
@@ -120,6 +117,7 @@
         const VolumeX = (props) => <Icon {...props} path={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>} />;
         const Video = (props) => <Icon {...props} path={<><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></>} />;
         const Square = (props) => <Icon {...props} path={<rect width="18" height="18" x="3" y="3" rx="2" ry="2" />} />;
+        const FileUp = (props) => <Icon {...props} path={<><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></>} />;
 
         function InstagramBattle() {
             const [gameState, setGameState] = useState('setup'); // setup, fighting, winner
@@ -150,8 +148,19 @@
                 return { collided: false };
             };
 
+            const handleFileUpload = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const text = e.target.result;
+                    setInputNames(text);
+                };
+                reader.readAsText(file);
+            };
+
             const handleStart = () => {
-                // Resume o contexto de áudio se estiver suspenso (necessário em alguns navegadores)
                 if (audioCtx.state === 'suspended') {
                     audioCtx.resume();
                 }
@@ -162,9 +171,22 @@
                 rawLines.forEach((line) => {
                     const trimmed = line.trim();
                     if (!trimmed) return;
-                    const parts = trimmed.split(',');
-                    let name = parts[0].trim().replace('@', '');
-                    let customImage = parts.length > 1 ? parts.slice(1).join(',').trim() : null;
+                    // Tenta detectar separador: virgula ou ponto e virgula
+                    const separator = trimmed.includes(',') ? ',' : trimmed.includes(';') ? ';' : null;
+                    
+                    let name = trimmed;
+                    let customImage = null;
+
+                    if (separator) {
+                        const parts = trimmed.split(separator);
+                        name = parts[0].trim().replace('@', '');
+                        if (parts.length > 1) {
+                             // Pega a URL. Remove aspas se houver
+                             customImage = parts.slice(1).join(separator).trim().replace(/['"]/g, "");
+                        }
+                    } else {
+                        name = trimmed.replace('@', '');
+                    }
 
                     if (name.length > 0) {
                         processedFighters.push({ name, customImage });
@@ -222,19 +244,17 @@
                 const currentH = arenaRef.current ? arenaRef.current.offsetHeight : window.innerHeight;
                 const allFighters = fightersRef.current;
                 
-                // 1. Vitória
                 const aliveCount = allFighters.filter(f => f.hp > 0).length;
                 if (aliveCount <= 1 && allFighters.length > 1) {
                     const winnerFound = allFighters.find(f => f.hp > 0);
                     if (winnerFound) {
                         setWinner(winnerFound);
                         setGameState('winner');
-                        playWinSound(isMuted); // Toca som de vitória
+                        playWinSound(isMuted); 
                         return;
                     }
                 }
 
-                // 2. Movimento
                 allFighters.forEach(f => {
                     f.x += f.vx * speed;
                     f.y += f.vy * speed;
@@ -246,7 +266,6 @@
                     if (f.y >= currentH - f.size) { f.y = currentH - f.size; f.vy *= -1; }
                 });
 
-                // 3. Colisão
                 for (let i = 0; i < allFighters.length; i++) {
                     for (let j = i + 1; j < allFighters.length; j++) {
                         const f1 = allFighters[i];
@@ -282,12 +301,12 @@
                                     f2.hp = Math.max(0, f2.hp - dmg);
                                     f2.isHit = true; f2.lastDamage = dmg;
                                     logMsg = `@${f1.name} > @${f2.name} (-${dmg})`;
-                                    playHitSound(isMuted); // Som de hit
+                                    playHitSound(isMuted);
                                 } else if (roll < 0.90) {
                                     f1.hp = Math.max(0, f1.hp - dmg);
                                     f1.isHit = true; f1.lastDamage = dmg;
                                     logMsg = `@${f2.name} > @${f1.name} (-${dmg})`;
-                                    playHitSound(isMuted); // Som de hit
+                                    playHitSound(isMuted);
                                 } else {
                                     const halfDmg = (dmg/2).toFixed(0);
                                     f1.hp = Math.max(0, f1.hp - halfDmg);
@@ -295,7 +314,7 @@
                                     f1.isHit = true; f1.lastDamage = halfDmg;
                                     f2.isHit = true; f2.lastDamage = halfDmg;
                                     logMsg = `CHOQUE! @${f1.name} x @${f2.name}`;
-                                    playHitSound(isMuted); // Som de hit
+                                    playHitSound(isMuted);
                                 }
 
                                 f1.hitCooldown = 30;
@@ -339,11 +358,9 @@
             const toggleRecording = async () => {
                 if (!isRecording) {
                     try {
-                        // Pede para o usuário selecionar a aba atual
-                        // Dica: A API getDisplayMedia grava a tela. O usuário deve selecionar a aba atual e "Compartilhar áudio"
                         const stream = await navigator.mediaDevices.getDisplayMedia({
                             video: { mediaSource: 'screen' },
-                            audio: true, // Solicita áudio do sistema/aba
+                            audio: true, 
                             preferCurrentTab: true
                         });
 
@@ -368,15 +385,12 @@
                             a.click();
                             URL.revokeObjectURL(url);
                             setIsRecording(false);
-                            
-                            // Para as tracks
                             stream.getTracks().forEach(track => track.stop());
                         };
 
                         mediaRecorder.start();
                         setIsRecording(true);
 
-                        // Se o usuário parar pelo navegador
                         stream.getVideoTracks()[0].onended = () => {
                             if (mediaRecorder.state !== 'inactive') {
                                 mediaRecorder.stop();
@@ -417,7 +431,6 @@
                         {/* Controls Group */}
                         <div className="flex gap-2 pointer-events-auto items-center">
                             
-                            {/* Recording Toggle */}
                              <button 
                                 onClick={toggleRecording}
                                 className={`p-2 rounded-lg transition border ${isRecording ? 'bg-red-600 border-red-500 text-white recording-pulse' : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white hover:bg-gray-700'}`}
@@ -426,7 +439,6 @@
                                 {isRecording ? <Square size={20} fill="currentColor" /> : <Video size={20} />}
                             </button>
 
-                            {/* Sound Toggle */}
                             <button 
                                 onClick={toggleSound}
                                 className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white hover:bg-gray-700 transition"
@@ -435,7 +447,6 @@
                                 {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
                             </button>
 
-                            {/* Speed Controls */}
                             {gameState === 'fighting' && (
                                 <div className="bg-gray-800 rounded-lg p-1 flex items-center gap-2 px-2 h-full">
                                     <span className="text-xs text-gray-400 uppercase font-bold hidden sm:inline">Velocidade</span>
@@ -451,17 +462,39 @@
                     {/* Setup Screen */}
                     {gameState === 'setup' && (
                         <div className="relative z-50 flex items-center justify-center h-full p-4">
-                            <div className="w-full max-w-2xl bg-gray-900/90 backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-gray-700">
-                                <h2 className="text-2xl font-bold mb-2 text-center">Configurar Arena</h2>
-                                <p className="text-gray-400 text-sm mb-4 text-center">
-                                    Cole apenas nomes (gera avatar) ou <code>nome, link_da_foto</code> (foto real)
-                                </p>
+                            <div className="w-full max-w-2xl bg-gray-900/90 backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-gray-700 flex flex-col gap-4">
+                                <div>
+                                    <h2 className="text-2xl font-bold mb-2 text-center">Configurar Arena</h2>
+                                    <p className="text-gray-400 text-sm mb-4 text-center">
+                                        Digite abaixo ou carregue um arquivo <code>.txt</code> ou <code>.csv</code>.<br/>
+                                        Formato: <code>Nome, URL_da_Foto</code> (um por linha)
+                                    </p>
+                                </div>
+
+                                {/* FILE INPUT */}
+                                <div className="bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed">
+                                    <label className="flex flex-col items-center cursor-pointer group">
+                                        <div className="flex items-center gap-2 text-pink-400 group-hover:text-pink-300 transition">
+                                            <FileUp size={24} />
+                                            <span className="font-bold">Carregar Arquivo (.txt / .csv)</span>
+                                        </div>
+                                        <span className="text-xs text-gray-500 mt-1">Substitui o conteúdo abaixo automaticamente</span>
+                                        <input 
+                                            type="file" 
+                                            accept=".txt,.csv"
+                                            onChange={handleFileUpload}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                </div>
+
                                 <textarea
                                     value={inputNames}
                                     onChange={(e) => setInputNames(e.target.value)}
-                                    className="w-full h-48 bg-black/50 border border-gray-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-pink-500 outline-none mb-6 font-mono text-xs sm:text-sm whitespace-pre"
+                                    className="w-full h-40 bg-black/50 border border-gray-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-pink-500 outline-none font-mono text-xs sm:text-sm whitespace-pre resize-none"
                                     placeholder={`@usuario1\n@usuario2, https://site.com/foto.jpg\n@usuario3`}
                                 />
+                                
                                 <div className="flex gap-4">
                                     <button onClick={handleStart} className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 py-4 rounded-xl font-bold shadow-lg text-lg transition hover:scale-105">
                                         INICIAR BATALHA
@@ -507,6 +540,7 @@
                                         <img 
                                             src={f.avatar} 
                                             alt={f.name} 
+                                            referrerPolicy="no-referrer"
                                             className="w-full h-full object-cover" 
                                             onError={(e) => {
                                                 e.target.onerror = null;
@@ -549,7 +583,7 @@
                                 
                                 <div className="my-8 relative group">
                                     <div className="w-48 h-48 rounded-full border-4 border-yellow-400 overflow-hidden mx-auto shadow-[0_0_50px_rgba(250,204,21,0.4)] group-hover:scale-105 transition-transform bg-gray-800">
-                                        <img src={winner.avatar} alt="Winner" className="w-full h-full object-cover" />
+                                        <img src={winner.avatar} alt="Winner" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                                     </div>
                                     <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black font-bold px-4 py-1 rounded-full border-2 border-white shadow-lg whitespace-nowrap">
                                         {winner.hp} HP RESTANTE
