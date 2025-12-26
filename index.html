@@ -17,6 +17,13 @@
     
     <style>
         body { margin: 0; overflow: hidden; background-color: black; }
+        
+        /* Otimização para GPU */
+        .fighter-container {
+            will-change: transform;
+            transform: translateZ(0); /* Força aceleração de hardware */
+        }
+
         /* Animações personalizadas */
         @keyframes bounce {
             0%, 100% { transform: translateY(-25%); animation-timing-function: cubic-bezier(0.8,0,1,1); }
@@ -39,6 +46,9 @@
         .recording-pulse {
             animation: pulse-red 2s infinite;
         }
+
+        /* Ocultar scrollbar */
+        ::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body>
@@ -47,106 +57,89 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback, memo } = React;
 
-        // Imagem padrão estilo Instagram (Silhueta Cinza)
+        // Imagem padrão
         const DEFAULT_AVATAR = "https://upload.wikimedia.org/wikipedia/commons/a/ac/Default_pfp.jpg";
 
-        // --- Gerenciador de Áudio (Sintetizador Web Audio API) ---
+        // --- Sistema de Áudio ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
         const playHitSound = (muted) => {
-            if (muted || audioCtx.state === 'suspended') {
-                audioCtx.resume();
-                if(muted) return;
-            }
-            
+            if (muted || audioCtx.state === 'suspended') { audioCtx.resume(); if(muted) return; }
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            
+            osc.connect(gain); gain.connect(audioCtx.destination);
             osc.type = 'square';
-            const freq = 100 + Math.random() * 50; 
-            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(100 + Math.random() * 50, audioCtx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.1);
-            
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-            
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.1);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.1);
         };
 
         const playWinSound = (muted) => {
             if (muted) return;
             if (audioCtx.state === 'suspended') audioCtx.resume();
-
             const now = audioCtx.currentTime;
-            
-            // Arpejo de vitória
             [0, 0.2, 0.4, 0.6].forEach((offset, i) => {
                 const osc = audioCtx.createOscillator();
                 const gain = audioCtx.createGain();
-                osc.connect(gain);
-                gain.connect(audioCtx.destination);
-                
+                osc.connect(gain); gain.connect(audioCtx.destination);
                 osc.type = 'triangle';
                 const notes = [523.25, 659.25, 783.99, 1046.50];
-                
                 osc.frequency.setValueAtTime(notes[i], now + offset);
-                
                 gain.gain.setValueAtTime(0, now + offset);
                 gain.gain.linearRampToValueAtTime(0.1, now + offset + 0.05);
                 gain.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.5);
-                
-                osc.start(now + offset);
-                osc.stop(now + offset + 0.5);
+                osc.start(now + offset); osc.stop(now + offset + 0.5);
             });
         };
 
-        // --- Componente de Avatar Inteligente (Tenta Proxy se falhar) ---
-        // Memoizado para evitar re-render desnecessário durante animação
+        // --- Avatar Otimizado (Cache + Proxy) ---
         const FighterAvatar = memo(({ url, name }) => {
-            const [imgSrc, setImgSrc] = useState(url);
-            const [retryStage, setRetryStage] = useState(0); // 0: Original, 1: Proxy, 2: Default
+            const [imgSrc, setImgSrc] = useState(DEFAULT_AVATAR);
 
             useEffect(() => {
-                setImgSrc(url);
-                setRetryStage(0);
-            }, [url]);
-
-            const handleError = () => {
-                if (retryStage === 0) {
-                    // Tenta usar o serviço wsrv.nl como proxy para bypassar CORS do Instagram
-                    // &output=jpg garante formato compatível
-                    const encodedUrl = encodeURIComponent(url);
-                    setImgSrc(`https://wsrv.nl/?url=${encodedUrl}&w=150&h=150&fit=cover&output=jpg`);
-                    setRetryStage(1);
-                } else {
-                    // Se falhar o proxy, usa o avatar padrão
+                if (!url) {
                     setImgSrc(DEFAULT_AVATAR);
-                    setRetryStage(2);
+                    return;
                 }
-            };
+
+                // Se for URL local (blob), usa direto
+                if (url.startsWith('blob:')) {
+                    setImgSrc(url);
+                    return;
+                }
+
+                // Se for URL externa, usa o proxy wsrv.nl para cache e velocidade
+                // Isso resolve 99% dos problemas de carregamento lento do Instagram
+                const encodedUrl = encodeURIComponent(url);
+                const proxyUrl = `https://wsrv.nl/?url=${encodedUrl}&w=150&h=150&fit=cover&output=webp&q=80`;
+                
+                // Pré-carrega para evitar piscadas
+                const img = new Image();
+                img.src = proxyUrl;
+                img.onload = () => setImgSrc(proxyUrl);
+                img.onerror = () => {
+                    // Fallback para original se o proxy falhar (raro) ou avatar padrão
+                    setImgSrc(DEFAULT_AVATAR); 
+                };
+
+            }, [url]);
 
             return (
                 <img 
                     src={imgSrc} 
                     alt={name} 
-                    referrerPolicy="no-referrer"
                     className="w-full h-full object-cover" 
-                    onError={handleError}
+                    onError={(e) => { e.target.src = DEFAULT_AVATAR; }}
                 />
             );
         });
 
-        // --- Ícones SVG Inline ---
+        // --- Ícones ---
         const Icon = ({ path, className, size = 24, fill = "none", stroke = "currentColor" }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                {path}
-            </svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{path}</svg>
         );
-
         const Swords = (props) => <Icon {...props} path={<><path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="m13 19 6-6"/><path d="M16 16 7 7"/><path d="m21 21-6-6"/></>} />;
         const Trophy = (props) => <Icon {...props} path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />;
         const Skull = (props) => <Icon {...props} path={<><path d="M11 20H8a2 2 0 0 1-2-2V9a9 9 0 0 1 18 0v9a2 2 0 0 1-2 2h-3"/><path d="M10 15h4"/><path d="M9 20v2"/><path d="M15 20v2"/></>} />;
@@ -156,132 +149,95 @@
         const Square = (props) => <Icon {...props} path={<rect width="18" height="18" x="3" y="3" rx="2" ry="2" />} />;
         const FileUp = (props) => <Icon {...props} path={<><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></>} />;
         const ImagePlus = (props) => <Icon {...props} path={<><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><line x1="16" x2="22" y1="5" y2="5"/><line x1="19" x2="19" y1="2" y2="8"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></>} />;
+        const Eye = (props) => <Icon {...props} path={<><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></>} />;
+        const EyeOff = (props) => <Icon {...props} path={<><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></>} />;
 
         function InstagramBattle() {
             const [gameState, setGameState] = useState('setup'); 
-            const [fighters, setFighters] = useState([]);
+            const [fighters, setFighters] = useState([]); // Usado apenas para renderização inicial e vencedor
             const [logs, setLogs] = useState([]);
             const [inputNames, setInputNames] = useState('');
             const [speed, setSpeed] = useState(1);
             const [winner, setWinner] = useState(null);
             const [isMuted, setIsMuted] = useState(false);
             const [isRecording, setIsRecording] = useState(false);
+            const [cinemaMode, setCinemaMode] = useState(false); // Novo modo Cinema
             const [localImages, setLocalImages] = useState({});
             
             const arenaRef = useRef(null);
             const animationFrame = useRef(null);
-            const fightersRef = useRef([]);
+            const fightersRef = useRef([]); // A fonte da verdade para física
             const mediaRecorderRef = useRef(null);
             const chunksRef = useRef([]);
 
+            // Physics Helper
             const checkCollision = (f1, f2) => {
                 const dx = (f2.x + f2.size/2) - (f1.x + f1.size/2);
                 const dy = (f2.y + f2.size/2) - (f1.y + f1.size/2);
                 const distance = Math.sqrt(dx * dx + dy * dy);
-                const minDistance = f1.size; 
-
-                if (distance < minDistance) {
-                    return { collided: true, dx, dy, distance };
-                }
+                if (distance < f1.size) return { collided: true, dx, dy, distance };
                 return { collided: false };
             };
 
             const handleFileUpload = (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
-
                 const reader = new FileReader();
-                reader.onload = (e) => {
-                    const text = e.target.result;
-                    setInputNames(text);
-                };
+                reader.onload = (e) => setInputNames(e.target.result);
                 reader.readAsText(file);
             };
 
             const handleImageUpload = (event) => {
                 const files = Array.from(event.target.files);
                 if (files.length === 0) return;
-
                 const newImages = { ...localImages };
-                
                 files.forEach(file => {
                     const nameKey = file.name.split('.')[0].toLowerCase().trim().replace(/[\s-]/g, '_');
                     newImages[nameKey] = URL.createObjectURL(file);
-                    const exactName = file.name.split('.')[0].trim();
-                    newImages[exactName] = URL.createObjectURL(file);
+                    newImages[file.name.split('.')[0].trim()] = URL.createObjectURL(file);
                 });
-
                 setLocalImages(newImages);
-                alert(`${files.length} imagens carregadas! Elas serão usadas automaticamente se o nome do arquivo coincidir com o nome do competidor.`);
+                alert(`${files.length} imagens carregadas!`);
             };
 
             const handleStart = () => {
-                if (audioCtx.state === 'suspended') {
-                    audioCtx.resume();
-                }
-
+                if (audioCtx.state === 'suspended') audioCtx.resume();
                 const rawLines = inputNames.split('\n');
                 const processedFighters = [];
 
                 rawLines.forEach((line) => {
                     const trimmed = line.trim();
                     if (!trimmed) return;
-                    
                     const separator = trimmed.includes(';') ? ';' : ',';
+                    let parts = separator === ';' ? trimmed.split(';') : trimmed.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
                     
-                    let parts;
-                    if (separator === ';') {
-                        parts = trimmed.split(';');
-                    } else {
-                        parts = trimmed.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-                    }
-                    
-                    let name = '';
-                    let customImage = null;
+                    let name = '', customImage = null;
 
-                    if (parts.length >= 7) {
-                        const colUsername = parts[1] ? parts[1].trim().replace(/^"|"$/g, '') : '';
-                        let rawUrl = parts[6] ? parts[6].trim().replace(/^"|"$/g, '') : '';
-                        
-                        if (!rawUrl.startsWith('http')) {
+                    if (parts.length >= 7) { // Formato Exportado
+                        const colUser = parts[1]?.trim().replace(/^"|"$/g, '');
+                        let rawUrl = parts[6]?.trim().replace(/^"|"$/g, '');
+                        if (!rawUrl?.startsWith('http')) {
                             const found = parts.find(p => p && p.trim().replace(/^"|"$/g, '').startsWith('http'));
-                            if (found) {
-                                rawUrl = found.trim().replace(/^"|"$/g, '');
-                            }
+                            if (found) rawUrl = found.trim().replace(/^"|"$/g, '');
                         }
-
-                        if (colUsername.toLowerCase() === 'username' || parts[0].toLowerCase().includes('user id')) {
-                            return;
-                        }
-
-                        name = colUsername.replace('@', '');
-                        if (rawUrl) {
-                            customImage = rawUrl.replace(/&amp;/g, '&');
-                        }
+                        if (colUser?.toLowerCase() === 'username' || parts[0].toLowerCase().includes('user id')) return;
+                        name = colUser?.replace('@', '');
+                        if (rawUrl) customImage = rawUrl.replace(/&amp;/g, '&');
                     } else if (parts.length >= 2) {
                         name = parts[0].trim().replace(/^"|"$/g, '').replace('@', '');
                         const rawUrl = parts.slice(1).join(separator).trim().replace(/^"|"$/g, '');
-                        if (rawUrl.startsWith('http')) {
-                             customImage = rawUrl.replace(/&amp;/g, '&');
-                        }
+                        if (rawUrl.startsWith('http')) customImage = rawUrl.replace(/&amp;/g, '&');
                     } else {
                         name = trimmed.replace(/^"|"$/g, '').replace('@', '');
                     }
 
                     const nameKey = name.toLowerCase().trim().replace(/[\s-]/g, '_');
-                    if (localImages[name] || localImages[nameKey]) {
-                        customImage = localImages[name] || localImages[nameKey];
-                    }
+                    if (localImages[name] || localImages[nameKey]) customImage = localImages[name] || localImages[nameKey];
 
-                    if (name.length > 0) {
-                        processedFighters.push({ name, customImage });
-                    }
+                    if (name.length > 0) processedFighters.push({ name, customImage });
                 });
                 
-                if (processedFighters.length < 2) {
-                    alert("Adicione pelo menos 2 competidores!");
-                    return;
-                }
+                if (processedFighters.length < 2) { alert("Adicione pelo menos 2 competidores!"); return; }
 
                 const currentW = arenaRef.current ? arenaRef.current.offsetWidth : window.innerWidth;
                 const currentH = arenaRef.current ? arenaRef.current.offsetHeight : window.innerHeight;
@@ -291,7 +247,7 @@
                     name: data.name,
                     hp: 100,
                     maxHp: 100,
-                    avatar: data.customImage ? data.customImage : DEFAULT_AVATAR,
+                    avatar: data.customImage || DEFAULT_AVATAR,
                     isHit: false,
                     lastDamage: 0,
                     hitCooldown: 0,
@@ -299,8 +255,7 @@
                     y: Math.random() * (currentH - 80),
                     vx: (Math.random() - 0.5) * 8,
                     vy: (Math.random() - 0.5) * 8,
-                    size: 60,
-                    mass: 1
+                    size: 60
                 }));
 
                 fightersRef.current = newFighters;
@@ -310,16 +265,11 @@
             };
 
             const loadDemo = () => {
-                const demoData = [
-                    "neymarjr, https://api.dicebear.com/9.x/micah/svg?seed=neymar",
-                    "anitta, https://api.dicebear.com/9.x/micah/svg?seed=anitta",
-                    "messi_fake, https://api.dicebear.com/9.x/micah/svg?seed=messi",
-                    "cristiano_robo, https://api.dicebear.com/9.x/bottts/svg?seed=cr7",
-                    "bob_esponja", "patrick_estrela", "lula_molusco", "sandy_bochechas", "seu_sirisueijo"
-                ];
+                const demoData = [ "neymarjr, https://github.com/shadcn.png", "anitta, https://github.com/vercel.png", "messi, https://github.com/facebook.png", "cr7, https://github.com/google.png", "bob_esponja", "patrick", "lula_molusco", "sandy" ];
                 setInputNames(demoData.join('\n'));
             };
 
+            // --- ANIMATION LOOP OTIMIZADO (SEM REACT RERENDER) ---
             const animate = useCallback(() => {
                 if (gameState !== 'fighting') return;
 
@@ -327,34 +277,41 @@
                 const currentH = arenaRef.current ? arenaRef.current.offsetHeight : window.innerHeight;
                 const allFighters = fightersRef.current;
                 
-                const aliveCount = allFighters.filter(f => f.hp > 0).length;
-                if (aliveCount <= 1 && allFighters.length > 1) {
-                    const winnerFound = allFighters.find(f => f.hp > 0);
-                    if (winnerFound) {
-                        setWinner(winnerFound);
-                        setGameState('winner');
-                        playWinSound(isMuted); 
-                        return;
-                    }
-                }
+                let aliveCount = 0;
+                let potentialWinner = null;
 
+                // 1. Movimento e Atualização DOM Direta
                 allFighters.forEach(f => {
-                    f.x += f.vx * speed;
-                    f.y += f.vy * speed;
-                    if (f.hitCooldown > 0) f.hitCooldown--;
-                    
-                    if (f.x <= 0) { f.x = 0; f.vx *= -1; }
-                    if (f.x >= currentW - f.size) { f.x = currentW - f.size; f.vx *= -1; }
-                    if (f.y <= 0) { f.y = 0; f.vy *= -1; }
-                    if (f.y >= currentH - f.size) { f.y = currentH - f.size; f.vy *= -1; }
+                    if (f.hp > 0) {
+                        aliveCount++;
+                        potentialWinner = f;
+                        
+                        f.x += f.vx * speed;
+                        f.y += f.vy * speed;
+                        if (f.hitCooldown > 0) f.hitCooldown--;
+                        
+                        if (f.x <= 0) { f.x = 0; f.vx *= -1; }
+                        if (f.x >= currentW - f.size) { f.x = currentW - f.size; f.vx *= -1; }
+                        if (f.y <= 0) { f.y = 0; f.vy *= -1; }
+                        if (f.y >= currentH - f.size) { f.y = currentH - f.size; f.vy *= -1; }
+
+                        // Manipulação Direta do DOM (Zero React Lag)
+                        const el = document.getElementById(`fighter-${f.id}`);
+                        if (el) {
+                            el.style.transform = `translate(${f.x}px, ${f.y}px)`;
+                            // Ocultar se morto (embora a logica de render trate isso, para updates em tempo real é bom)
+                        }
+                    }
                 });
 
+                // 2. Colisões
                 for (let i = 0; i < allFighters.length; i++) {
-                    for (let j = i + 1; j < allFighters.length; j++) {
-                        const f1 = allFighters[i];
-                        const f2 = allFighters[j];
+                    const f1 = allFighters[i];
+                    if (f1.hp <= 0) continue;
 
-                        if (f1.hp <= 0 || f2.hp <= 0) continue;
+                    for (let j = i + 1; j < allFighters.length; j++) {
+                        const f2 = allFighters[j];
+                        if (f2.hp <= 0) continue;
 
                         const { collided, dx, dy, distance } = checkCollision(f1, f2);
 
@@ -363,58 +320,79 @@
                             const normalX = dx / distance;
                             const normalY = dy / distance;
 
-                            f1.x -= overlap * normalX;
-                            f1.y -= overlap * normalY;
-                            f2.x += overlap * normalX;
-                            f2.y += overlap * normalY;
+                            f1.x -= overlap * normalX; f1.y -= overlap * normalY;
+                            f2.x += overlap * normalX; f2.y += overlap * normalY;
 
-                            const tempVx = f1.vx;
-                            const tempVy = f1.vy;
-                            f1.vx = f2.vx + (Math.random() - 0.5); 
-                            f1.vy = f2.vy + (Math.random() - 0.5);
-                            f2.vx = tempVx + (Math.random() - 0.5);
-                            f2.vy = tempVy + (Math.random() - 0.5);
+                            const tempVx = f1.vx; const tempVy = f1.vy;
+                            f1.vx = f2.vx + (Math.random()-0.5); f1.vy = f2.vy + (Math.random()-0.5);
+                            f2.vx = tempVx + (Math.random()-0.5); f2.vy = tempVy + (Math.random()-0.5);
 
                             if (f1.hitCooldown <= 0 && f2.hitCooldown <= 0) {
-                                const roll = Math.random();
-                                let logMsg = "";
                                 const dmg = Math.floor(Math.random() * 15) + 5;
+                                const roll = Math.random();
+                                let msg = "";
 
                                 if (roll < 0.45) {
                                     f2.hp = Math.max(0, f2.hp - dmg);
-                                    f2.isHit = true; f2.lastDamage = dmg;
-                                    logMsg = `@${f1.name} > @${f2.name} (-${dmg})`;
+                                    msg = `@${f1.name} hit @${f2.name} (-${dmg})`;
                                     playHitSound(isMuted);
+                                    // Update visual HP
+                                    const hpBar = document.getElementById(`hp-bar-${f2.id}`);
+                                    if(hpBar) hpBar.style.width = `${f2.hp}%`;
+                                    if(hpBar && f2.hp < 30) hpBar.style.backgroundColor = '#ef4444';
+                                    
+                                    if (f2.hp <= 0) {
+                                        const elF2 = document.getElementById(`fighter-${f2.id}`);
+                                        if(elF2) {
+                                            elF2.style.opacity = '0.4';
+                                            elF2.style.filter = 'grayscale(100%)';
+                                            elF2.style.zIndex = '0';
+                                        }
+                                    }
                                 } else if (roll < 0.90) {
                                     f1.hp = Math.max(0, f1.hp - dmg);
-                                    f1.isHit = true; f1.lastDamage = dmg;
-                                    logMsg = `@${f2.name} > @${f1.name} (-${dmg})`;
+                                    msg = `@${f2.name} hit @${f1.name} (-${dmg})`;
                                     playHitSound(isMuted);
+                                    const hpBar = document.getElementById(`hp-bar-${f1.id}`);
+                                    if(hpBar) hpBar.style.width = `${f1.hp}%`;
+                                    if(hpBar && f1.hp < 30) hpBar.style.backgroundColor = '#ef4444';
+
+                                    if (f1.hp <= 0) {
+                                        const elF1 = document.getElementById(`fighter-${f1.id}`);
+                                        if(elF1) {
+                                            elF1.style.opacity = '0.4';
+                                            elF1.style.filter = 'grayscale(100%)';
+                                            elF1.style.zIndex = '0';
+                                        }
+                                    }
                                 } else {
-                                    const halfDmg = (dmg/2).toFixed(0);
-                                    f1.hp = Math.max(0, f1.hp - halfDmg);
-                                    f2.hp = Math.max(0, f2.hp - halfDmg);
-                                    f1.isHit = true; f1.lastDamage = halfDmg;
-                                    f2.isHit = true; f2.lastDamage = halfDmg;
-                                    logMsg = `CHOQUE! @${f1.name} x @${f2.name}`;
+                                    // Choque
+                                    const half = Math.floor(dmg/2);
+                                    f1.hp = Math.max(0, f1.hp - half);
+                                    f2.hp = Math.max(0, f2.hp - half);
+                                    msg = "CHOQUE!";
                                     playHitSound(isMuted);
+                                    const hp1 = document.getElementById(`hp-bar-${f1.id}`);
+                                    if(hp1) hp1.style.width = `${f1.hp}%`;
+                                    const hp2 = document.getElementById(`hp-bar-${f2.id}`);
+                                    if(hp2) hp2.style.width = `${f2.hp}%`;
                                 }
 
-                                f1.hitCooldown = 30;
-                                f2.hitCooldown = 30;
-
-                                if (logMsg) setLogs(prev => [logMsg, ...prev.slice(0, 2)]);
-
-                                setTimeout(() => {
-                                    f1.isHit = false;
-                                    f2.isHit = false;
-                                }, 300);
+                                f1.hitCooldown = 30; f2.hitCooldown = 30;
+                                if (msg) setLogs(prev => [msg, ...prev.slice(0, 2)]);
                             }
                         }
                     }
                 }
 
-                setFighters([...allFighters]);
+                // Check Win
+                if (aliveCount <= 1 && allFighters.length > 1 && potentialWinner) {
+                    setWinner(potentialWinner);
+                    setGameState('winner');
+                    playWinSound(isMuted);
+                    return;
+                }
+
                 animationFrame.current = requestAnimationFrame(animate);
             }, [gameState, speed, isMuted]);
 
@@ -433,60 +411,35 @@
                 fightersRef.current = [];
             };
 
-            const toggleSound = () => {
-                setIsMuted(!isMuted);
-                if (audioCtx.state === 'suspended') audioCtx.resume();
-            };
-
             const toggleRecording = async () => {
                 if (!isRecording) {
                     try {
                         const stream = await navigator.mediaDevices.getDisplayMedia({
-                            video: { mediaSource: 'screen' },
+                            video: { mediaSource: 'screen', frameRate: 30 }, // 30fps para pesar menos
                             audio: true, 
                             preferCurrentTab: true
                         });
-
-                        const mimeType = MediaRecorder.isTypeSupported("video/webm; codecs=vp9")
-                                        ? "video/webm; codecs=vp9"
-                                        : "video/webm";
-
-                        const mediaRecorder = new MediaRecorder(stream, { mimeType });
+                        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
                         mediaRecorderRef.current = mediaRecorder;
                         chunksRef.current = [];
-
-                        mediaRecorder.ondataavailable = (e) => {
-                            if (e.data.size > 0) chunksRef.current.push(e.data);
-                        };
-
+                        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
                         mediaRecorder.onstop = () => {
                             const blob = new Blob(chunksRef.current, { type: "video/webm" });
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement("a");
                             a.href = url;
-                            a.download = `bate-bate-royale-${new Date().getTime()}.webm`;
+                            a.download = `bate-bate-royale-${Date.now()}.webm`;
                             a.click();
                             URL.revokeObjectURL(url);
                             setIsRecording(false);
-                            stream.getTracks().forEach(track => track.stop());
+                            stream.getTracks().forEach(t => t.stop());
                         };
-
                         mediaRecorder.start();
                         setIsRecording(true);
-
-                        stream.getVideoTracks()[0].onended = () => {
-                            if (mediaRecorder.state !== 'inactive') {
-                                mediaRecorder.stop();
-                            }
-                        };
-
-                    } catch (err) {
-                        console.error("Erro gravação:", err);
-                    }
+                        stream.getVideoTracks()[0].onended = () => { if (mediaRecorder.state !== 'inactive') mediaRecorder.stop(); };
+                    } catch (err) { console.error(err); }
                 } else {
-                    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-                        mediaRecorderRef.current.stop();
-                    }
+                    if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current.stop();
                 }
             };
 
@@ -505,188 +458,121 @@
                                 <Swords className="text-white" size={24} /> Bate-Bate Royale
                             </h1>
                             {gameState === 'fighting' && (
-                                <div className="text-green-400 font-mono text-sm mt-1 bg-black/50 inline-block px-2 rounded">
-                                    Vivos: {fighters.filter(f => f.hp > 0).length} / {fighters.length}
+                                <div className="text-green-400 font-mono text-sm mt-1 bg-black/50 inline-block px-2 rounded backdrop-blur">
+                                    <span className="font-bold">Vivos:</span> <span id="alive-count">{fighters.length}</span>
                                 </div>
                             )}
                         </div>
 
-                        {/* Controls Group */}
-                        <div className="flex gap-2 pointer-events-auto items-center">
-                            
-                             <button 
-                                onClick={toggleRecording}
-                                className={`p-2 rounded-lg transition border ${isRecording ? 'bg-red-600 border-red-500 text-white recording-pulse' : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white hover:bg-gray-700'}`}
-                                title={isRecording ? "Parar Gravação (Baixar)" : "Gravar Jogo"}
-                            >
-                                {isRecording ? <Square size={20} fill="currentColor" /> : <Video size={20} />}
-                            </button>
+                        {/* Controls Group - Oculto no Modo Cinema */}
+                        {!cinemaMode && (
+                            <div className="flex gap-2 pointer-events-auto items-center animate-fade-in">
+                                <button onClick={toggleRecording} className={`p-2 rounded-lg transition border ${isRecording ? 'bg-red-600 border-red-500 text-white recording-pulse' : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white'}`} title="Gravar Tela">
+                                    {isRecording ? <Square size={20} fill="currentColor" /> : <Video size={20} />}
+                                </button>
+                                <button onClick={() => setIsMuted(!isMuted)} className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white transition" title="Som">
+                                    {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                                </button>
+                                <button onClick={() => setCinemaMode(true)} className="bg-purple-600 p-2 rounded-lg text-white hover:bg-purple-500 transition" title="Modo Cinema (Ocultar Interface)">
+                                    <EyeOff size={20} />
+                                </button>
 
-                            <button 
-                                onClick={toggleSound}
-                                className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white hover:bg-gray-700 transition"
-                                title={isMuted ? "Ativar Som" : "Desativar Som"}
-                            >
-                                {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-                            </button>
+                                {gameState === 'fighting' && (
+                                    <div className="bg-gray-800 rounded-lg p-1 flex items-center gap-2 px-2 h-full">
+                                        <button onClick={() => setSpeed(0.5)} className={`p-1.5 rounded text-xs font-bold ${speed===0.5?'bg-pink-600':'text-gray-400'}`}>0.5x</button>
+                                        <button onClick={() => setSpeed(1)} className={`p-1.5 rounded text-xs font-bold ${speed===1?'bg-pink-600':'text-gray-400'}`}>1x</button>
+                                        <button onClick={() => setSpeed(4)} className={`p-1.5 rounded text-xs font-bold ${speed===4?'bg-pink-600':'text-gray-400'}`}>MAX</button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
-                            {gameState === 'fighting' && (
-                                <div className="bg-gray-800 rounded-lg p-1 flex items-center gap-2 px-2 h-full">
-                                    <span className="text-xs text-gray-400 uppercase font-bold hidden sm:inline">Velocidade</span>
-                                    <button onClick={() => setSpeed(0.5)} className={`p-1.5 rounded text-xs font-bold ${speed === 0.5 ? 'bg-pink-600' : 'bg-gray-700 text-gray-400'}`}>0.5x</button>
-                                    <button onClick={() => setSpeed(1)} className={`p-1.5 rounded text-xs font-bold ${speed === 1 ? 'bg-pink-600' : 'bg-gray-700 text-gray-400'}`}>1x</button>
-                                    <button onClick={() => setSpeed(2)} className={`p-1.5 rounded text-xs font-bold ${speed === 2 ? 'bg-pink-600' : 'bg-gray-700 text-gray-400'}`}>2x</button>
-                                    <button onClick={() => setSpeed(4)} className={`p-1.5 rounded text-xs font-bold ${speed === 4 ? 'bg-pink-600' : 'bg-gray-700 text-gray-400'}`}>MAX</button>
-                                </div>
-                            )}
-                        </div>
+                        {/* Botão Sair do Modo Cinema (Sempre visível se ativo, mas discreto) */}
+                        {cinemaMode && (
+                            <button onClick={() => setCinemaMode(false)} className="pointer-events-auto bg-gray-800/50 hover:bg-gray-700 p-2 rounded-full text-gray-400 transition" title="Sair do Modo Cinema">
+                                <Eye size={20} />
+                            </button>
+                        )}
                     </div>
 
                     {/* Setup Screen */}
                     {gameState === 'setup' && (
                         <div className="relative z-50 flex items-center justify-center h-full p-4">
                             <div className="w-full max-w-2xl bg-gray-900/90 backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-gray-700 flex flex-col gap-4">
-                                <div>
-                                    <h2 className="text-2xl font-bold mb-2 text-center">Configurar Arena</h2>
-                                    <p className="text-gray-400 text-sm mb-4 text-center">
-                                        Digite abaixo ou carregue um arquivo <code>.txt</code> ou <code>.csv</code>.<br/>
-                                        Formato: <code>Nome, URL_da_Foto</code> (um por linha)
-                                    </p>
-                                </div>
-
-                                {/* FILE INPUTS ROW */}
+                                <h2 className="text-2xl font-bold text-center">Configurar Arena</h2>
+                                
                                 <div className="flex gap-4 w-full">
-                                    {/* LIST FILE INPUT */}
                                     <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-pink-500 transition">
                                         <label className="flex flex-col items-center cursor-pointer group h-full justify-center">
-                                            <div className="flex items-center gap-2 text-pink-400 group-hover:text-pink-300 transition">
-                                                <FileUp size={24} />
-                                                <span className="font-bold text-sm">Lista de Nomes (.txt)</span>
-                                            </div>
-                                            <input 
-                                                type="file" 
-                                                accept=".txt,.csv"
-                                                onChange={handleFileUpload}
-                                                className="hidden"
-                                            />
+                                            <div className="flex items-center gap-2 text-pink-400 group-hover:text-pink-300 transition"><FileUp size={24}/><span className="font-bold text-sm">Lista (.txt/.csv)</span></div>
+                                            <input type="file" accept=".txt,.csv" onChange={handleFileUpload} className="hidden"/>
                                         </label>
                                     </div>
-
-                                    {/* IMAGE FOLDER INPUT */}
                                     <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-green-500 transition">
                                         <label className="flex flex-col items-center cursor-pointer group h-full justify-center">
-                                            <div className="flex items-center gap-2 text-green-400 group-hover:text-green-300 transition">
-                                                <ImagePlus size={24} />
-                                                <span className="font-bold text-sm">Carregar Fotos (Várias)</span>
-                                            </div>
-                                            <span className="text-[10px] text-gray-500 mt-1 text-center leading-tight">Nome do arquivo deve ser igual ao nome do usuário</span>
-                                            <input 
-                                                type="file" 
-                                                accept="image/*"
-                                                multiple
-                                                onChange={handleImageUpload}
-                                                className="hidden"
-                                            />
+                                            <div className="flex items-center gap-2 text-green-400 group-hover:text-green-300 transition"><ImagePlus size={24}/><span className="font-bold text-sm">Fotos Locais</span></div>
+                                            <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden"/>
                                         </label>
                                     </div>
                                 </div>
 
-                                <textarea
-                                    value={inputNames}
-                                    onChange={(e) => setInputNames(e.target.value)}
-                                    className="w-full h-40 bg-black/50 border border-gray-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-pink-500 outline-none font-mono text-xs sm:text-sm whitespace-pre resize-none"
-                                    placeholder={`@usuario1\n@usuario2, https://site.com/foto.jpg\n@usuario3`}
-                                />
+                                <textarea value={inputNames} onChange={(e) => setInputNames(e.target.value)} className="w-full h-40 bg-black/50 border border-gray-600 rounded-lg p-3 text-white outline-none font-mono text-xs resize-none" placeholder={`@usuario1\n@usuario2, https://site.com/foto.jpg`}/>
                                 
                                 <div className="flex gap-4">
-                                    <button onClick={handleStart} className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 py-4 rounded-xl font-bold shadow-lg text-lg transition hover:scale-105">
-                                        INICIAR BATALHA
-                                    </button>
-                                    <button onClick={loadDemo} className="px-6 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold text-gray-300">
-                                        Demo
-                                    </button>
+                                    <button onClick={handleStart} className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 py-4 rounded-xl font-bold shadow-lg transition hover:scale-105">INICIAR</button>
+                                    <button onClick={loadDemo} className="px-6 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold text-gray-300">Demo</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Arena */}
+                    {/* Arena (Renderização Inicial única) */}
                     <div ref={arenaRef} className="absolute inset-0 overflow-hidden">
-                        {gameState === 'fighting' && fighters.map((f) => {
-                            const isDead = f.hp <= 0;
-                            return (
-                                <div
-                                    key={f.id}
-                                    className={`absolute flex flex-col items-center justify-center will-change-transform ${isDead ? 'z-0' : 'z-20'}`}
-                                    style={{
-                                        transform: `translate(${f.x}px, ${f.y}px)`,
-                                        width: `${f.size}px`,
-                                        transition: 'transform 0s',
-                                    }}
-                                >
-                                    {f.isHit && (
-                                        <div className="absolute -top-10 text-red-500 font-black text-3xl animate-bounce whitespace-nowrap drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] z-50 pointer-events-none">
-                                            -{f.lastDamage}
-                                        </div>
-                                    )}
-
-                                    <div className={`
-                                        relative rounded-full border-4 overflow-hidden shadow-xl
-                                        ${isDead 
-                                            ? 'w-12 h-12 border-gray-800 opacity-40 grayscale blur-[1px]' 
-                                            : f.isHit 
-                                                ? 'w-16 h-16 border-red-500 scale-110 shadow-red-500/50 rotate-12' 
-                                                : 'w-16 h-16 border-white/20'
-                                        }
-                                        transition-all duration-100 bg-gray-800
-                                    `}>
-                                        <FighterAvatar url={f.avatar} name={f.name} />
-                                        {isDead && <div className="absolute inset-0 bg-black/60 flex items-center justify-center"><Skull size={20}/></div>}
-                                    </div>
-
-                                    {!isDead && (
-                                        <div className="absolute -bottom-6 w-24 flex flex-col items-center pointer-events-none">
-                                            <span className="text-[10px] font-bold text-white drop-shadow-md truncate max-w-full bg-black/40 px-1 rounded mb-0.5">@{f.name}</span>
-                                            <div className="w-full h-1.5 bg-gray-800 rounded-full border border-gray-600">
-                                                <div className={`h-full rounded-full ${f.hp < 30 ? 'bg-red-500' : f.hp < 60 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{width: `${(f.hp/f.maxHp)*100}%`}}></div>
-                                            </div>
-                                        </div>
-                                    )}
+                        {fighters.map((f) => (
+                            <div
+                                key={f.id}
+                                id={`fighter-${f.id}`}
+                                className="absolute flex flex-col items-center justify-center fighter-container"
+                                style={{
+                                    width: `${f.size}px`,
+                                    // A posição será controlada via JS direto no DOM para performance
+                                    transform: `translate(${f.x}px, ${f.y}px)`,
+                                    zIndex: 10
+                                }}
+                            >
+                                <div className="relative w-full aspect-square rounded-full border-4 border-white/20 overflow-hidden shadow-xl bg-gray-800">
+                                    <FighterAvatar url={f.avatar} name={f.name} />
                                 </div>
-                            );
-                        })}
+                                <div className="absolute -bottom-6 w-24 flex flex-col items-center">
+                                    <span className="text-[10px] font-bold text-white drop-shadow-md truncate max-w-full bg-black/40 px-1 rounded mb-0.5">{f.name}</span>
+                                    <div className="w-full h-1.5 bg-gray-800 rounded-full border border-gray-600 overflow-hidden">
+                                        <div id={`hp-bar-${f.id}`} className="h-full bg-green-500 transition-colors duration-300" style={{ width: '100%' }}></div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
                     </div>
 
-                    {/* Ticker Log */}
-                    {gameState === 'fighting' && logs.length > 0 && (
-                        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-black/80 backdrop-blur px-8 py-3 rounded-full border border-red-500/30 text-yellow-400 font-mono text-lg z-40 whitespace-nowrap shadow-lg">
+                    {/* Logs */}
+                    {gameState === 'fighting' && logs.length > 0 && !cinemaMode && (
+                        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-black/80 backdrop-blur px-8 py-3 rounded-full border border-red-500/30 text-yellow-400 font-mono text-lg z-40 whitespace-nowrap shadow-lg animate-bounce">
                             {logs[0]}
                         </div>
                     )}
 
-                    {/* Winner Screen */}
+                    {/* Winner */}
                     {gameState === 'winner' && winner && (
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 animate-fade-in p-4">
                             <div className="text-center">
-                                <div className="relative inline-block mb-6">
-                                    <div className="absolute inset-0 bg-yellow-500 blur-3xl opacity-20 animate-pulse"></div>
-                                    <Trophy className="w-32 h-32 text-yellow-400 relative z-10 animate-bounce" />
-                                </div>
-                                
-                                <h2 className="text-4xl font-black text-white mb-2 tracking-tighter">O ÚLTIMO SOBREVIVENTE</h2>
-                                
+                                <div className="relative inline-block mb-6"><Trophy className="w-32 h-32 text-yellow-400 animate-bounce" /></div>
+                                <h2 className="text-4xl font-black text-white mb-2">VENCEDOR</h2>
                                 <div className="my-8 relative group">
-                                    <div className="w-48 h-48 rounded-full border-4 border-yellow-400 overflow-hidden mx-auto shadow-[0_0_50px_rgba(250,204,21,0.4)] group-hover:scale-105 transition-transform bg-gray-800">
+                                    <div className="w-48 h-48 rounded-full border-4 border-yellow-400 overflow-hidden mx-auto shadow-xl bg-gray-800">
                                         <FighterAvatar url={winner.avatar} name={winner.name} />
                                     </div>
-                                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black font-bold px-4 py-1 rounded-full border-2 border-white shadow-lg whitespace-nowrap">
-                                        {winner.hp} HP RESTANTE
-                                    </div>
                                 </div>
-
-                                <h3 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-400 to-yellow-300 mb-8 break-all max-w-2xl">
-                                    @{winner.name}
-                                </h3>
+                                <h3 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-400 mb-8">{winner.name}</h3>
+                                <button onClick={resetGame} className="bg-white text-black hover:bg-gray-200 px-8 py-3 rounded-full font-bold flex items-center gap-2 mx-auto"><RotateCcw size={20}/> Novo Jogo</button>
                             </div>
                         </div>
                     )}
