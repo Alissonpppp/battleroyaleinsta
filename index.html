@@ -191,33 +191,57 @@
                     const trimmed = line.trim();
                     if (!trimmed) return;
                     
-                    // Regex para dividir CSV respeitando aspas (caso nome ou algo tenha vírgula)
-                    // Ou split simples se não houver aspas complexas
-                    const parts = trimmed.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                    // Detecção de separador (vírgula ou ponto e vírgula)
+                    const separator = trimmed.includes(';') ? ';' : ',';
+                    
+                    let parts;
+                    if (separator === ';') {
+                        // Split simples para ;
+                        parts = trimmed.split(';');
+                    } else {
+                        // Regex para dividir CSV respeitando aspas (padrão)
+                        parts = trimmed.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                    }
                     
                     let name = '';
                     let customImage = null;
 
-                    // Lógica para detectar o formato de 7 colunas do export
-                    // Colunas esperadas: user id, username, full name, followed by you, is verified, profile url, avatar url
-                    // index 1: username
-                    // index 6: avatar url
+                    // Lógica para detectar o formato de exportação (7 colunas ou mais)
+                    // user id, username, full name, followed by you, is verified, profile url, avatar url
                     if (parts.length >= 7) {
-                        const colUsername = parts[1].trim().replace(/^"|"$/g, '');
-                        const colAvatar = parts[6].trim().replace(/^"|"$/g, '');
+                        const colUsername = parts[1] ? parts[1].trim().replace(/^"|"$/g, '') : '';
+                        
+                        // Busca inteligente da URL da imagem
+                        // Primeiro tenta a coluna 6 (avatar url)
+                        let rawUrl = parts[6] ? parts[6].trim().replace(/^"|"$/g, '') : '';
+                        
+                        // Se a coluna 6 não parecer um link, varre a linha procurando algo que comece com http
+                        if (!rawUrl.startsWith('http')) {
+                            const found = parts.find(p => p && p.trim().replace(/^"|"$/g, '').startsWith('http'));
+                            if (found) {
+                                rawUrl = found.trim().replace(/^"|"$/g, '');
+                            }
+                        }
 
-                        // Ignora a linha de cabeçalho se for detectada
+                        // Ignora a linha de cabeçalho
                         if (colUsername.toLowerCase() === 'username' || parts[0].toLowerCase().includes('user id')) {
                             return;
                         }
 
                         name = colUsername.replace('@', '');
-                        customImage = colAvatar;
+                        
+                        // Correção de URL (Decodifica &amp; para &)
+                        if (rawUrl) {
+                            customImage = rawUrl.replace(/&amp;/g, '&');
+                        }
                     } 
-                    // Fallback para formato simples "nome, imagem"
+                    // Fallback para formato simples "nome, imagem" (manual)
                     else if (parts.length >= 2) {
                         name = parts[0].trim().replace(/^"|"$/g, '').replace('@', '');
-                        customImage = parts.slice(1).join(',').trim().replace(/^"|"$/g, '');
+                        const rawUrl = parts.slice(1).join(separator).trim().replace(/^"|"$/g, '');
+                        if (rawUrl.startsWith('http')) {
+                             customImage = rawUrl.replace(/&amp;/g, '&');
+                        }
                     } 
                     // Fallback para apenas nome
                     else {
