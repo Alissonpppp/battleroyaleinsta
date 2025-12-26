@@ -21,33 +21,20 @@
         /* Otimização para GPU */
         .fighter-container {
             will-change: transform;
-            transform: translateZ(0); /* Força aceleração de hardware */
+            transform: translateZ(0);
         }
 
-        /* Animações personalizadas */
-        @keyframes bounce {
-            0%, 100% { transform: translateY(-25%); animation-timing-function: cubic-bezier(0.8,0,1,1); }
-            50% { transform: translateY(0); animation-timing-function: cubic-bezier(0,0,0.2,1); }
-        }
+        /* Animações */
+        @keyframes bounce { 0%, 100% { transform: translateY(-25%); } 50% { transform: translateY(0); } }
         .animate-bounce { animation: bounce 1s infinite; }
-        
-        @keyframes fade-in {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
         .animate-fade-in { animation: fade-in 0.5s ease-out; }
+        @keyframes pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+        .recording-pulse { animation: pulse-red 2s infinite; }
+        
+        /* Loader Bar */
+        .loader-bar { transition: width 0.2s ease-out; }
 
-        /* Indicador de gravação pulsante */
-        @keyframes pulse-red {
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-        }
-        .recording-pulse {
-            animation: pulse-red 2s infinite;
-        }
-
-        /* Ocultar scrollbar */
         ::-webkit-scrollbar { display: none; }
     </style>
 </head>
@@ -57,19 +44,16 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback, memo } = React;
 
-        // Imagem padrão
         const DEFAULT_AVATAR = "https://upload.wikimedia.org/wikipedia/commons/a/ac/Default_pfp.jpg";
-
-        // --- Sistema de Áudio ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
+        // --- Funções de Áudio ---
         const playHitSound = (muted) => {
             if (muted || audioCtx.state === 'suspended') { audioCtx.resume(); if(muted) return; }
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
+            const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
             osc.connect(gain); gain.connect(audioCtx.destination);
             osc.type = 'square';
-            osc.frequency.setValueAtTime(100 + Math.random() * 50, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(100 + Math.random()*50, audioCtx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.1);
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
@@ -80,97 +64,58 @@
             if (muted) return;
             if (audioCtx.state === 'suspended') audioCtx.resume();
             const now = audioCtx.currentTime;
-            [0, 0.2, 0.4, 0.6].forEach((offset, i) => {
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
+            [0, 0.2, 0.4, 0.6].forEach((o, i) => {
+                const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
                 osc.connect(gain); gain.connect(audioCtx.destination);
                 osc.type = 'triangle';
-                const notes = [523.25, 659.25, 783.99, 1046.50];
-                osc.frequency.setValueAtTime(notes[i], now + offset);
-                gain.gain.setValueAtTime(0, now + offset);
-                gain.gain.linearRampToValueAtTime(0.1, now + offset + 0.05);
-                gain.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.5);
-                osc.start(now + offset); osc.stop(now + offset + 0.5);
+                osc.frequency.setValueAtTime([523.25, 659.25, 783.99, 1046.50][i], now + o);
+                gain.gain.setValueAtTime(0, now + o);
+                gain.gain.linearRampToValueAtTime(0.1, now + o + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + o + 0.5);
+                osc.start(now + o); osc.stop(now + o + 0.5);
             });
         };
 
-        // --- Avatar Otimizado (Cache + Proxy) ---
-        const FighterAvatar = memo(({ url, name }) => {
-            const [imgSrc, setImgSrc] = useState(DEFAULT_AVATAR);
-
-            useEffect(() => {
-                if (!url) {
-                    setImgSrc(DEFAULT_AVATAR);
-                    return;
-                }
-
-                // Se for URL local (blob), usa direto
-                if (url.startsWith('blob:')) {
-                    setImgSrc(url);
-                    return;
-                }
-
-                // Se for URL externa, usa o proxy wsrv.nl para cache e velocidade
-                // Isso resolve 99% dos problemas de carregamento lento do Instagram
-                const encodedUrl = encodeURIComponent(url);
-                const proxyUrl = `https://wsrv.nl/?url=${encodedUrl}&w=150&h=150&fit=cover&output=webp&q=80`;
-                
-                // Pré-carrega para evitar piscadas
-                const img = new Image();
-                img.src = proxyUrl;
-                img.onload = () => setImgSrc(proxyUrl);
-                img.onerror = () => {
-                    // Fallback para original se o proxy falhar (raro) ou avatar padrão
-                    setImgSrc(DEFAULT_AVATAR); 
-                };
-
-            }, [url]);
-
-            return (
-                <img 
-                    src={imgSrc} 
-                    alt={name} 
-                    className="w-full h-full object-cover" 
-                    onError={(e) => { e.target.src = DEFAULT_AVATAR; }}
-                />
-            );
-        });
-
         // --- Ícones ---
-        const Icon = ({ path, className, size = 24, fill = "none", stroke = "currentColor" }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{path}</svg>
-        );
-        const Swords = (props) => <Icon {...props} path={<><path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="m13 19 6-6"/><path d="M16 16 7 7"/><path d="m21 21-6-6"/></>} />;
-        const Trophy = (props) => <Icon {...props} path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />;
-        const Skull = (props) => <Icon {...props} path={<><path d="M11 20H8a2 2 0 0 1-2-2V9a9 9 0 0 1 18 0v9a2 2 0 0 1-2 2h-3"/><path d="M10 15h4"/><path d="M9 20v2"/><path d="M15 20v2"/></>} />;
-        const Volume2 = (props) => <Icon {...props} path={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></>} />;
-        const VolumeX = (props) => <Icon {...props} path={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>} />;
-        const Video = (props) => <Icon {...props} path={<><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></>} />;
-        const Square = (props) => <Icon {...props} path={<rect width="18" height="18" x="3" y="3" rx="2" ry="2" />} />;
-        const FileUp = (props) => <Icon {...props} path={<><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></>} />;
-        const ImagePlus = (props) => <Icon {...props} path={<><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><line x1="16" x2="22" y1="5" y2="5"/><line x1="19" x2="19" y1="2" y2="8"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></>} />;
-        const Eye = (props) => <Icon {...props} path={<><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></>} />;
-        const EyeOff = (props) => <Icon {...props} path={<><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></>} />;
+        const Icon = ({ path, className, size=24 }) => ( <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{path}</svg> );
+        const Swords = (p) => <Icon {...p} path={<><path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="m13 19 6-6"/><path d="M16 16 7 7"/><path d="m21 21-6-6"/></>} />;
+        const Trophy = (p) => <Icon {...p} path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />;
+        const Skull = (p) => <Icon {...p} path={<><path d="M11 20H8a2 2 0 0 1-2-2V9a9 9 0 0 1 18 0v9a2 2 0 0 1-2 2h-3"/><path d="M10 15h4"/><path d="M9 20v2"/><path d="M15 20v2"/></>} />;
+        const Volume2 = (p) => <Icon {...p} path={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></>} />;
+        const VolumeX = (p) => <Icon {...p} path={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>} />;
+        const Video = (p) => <Icon {...p} path={<><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></>} />;
+        const Square = (p) => <Icon {...p} path={<rect width="18" height="18" x="3" y="3" rx="2" ry="2" />} />;
+        const FileUp = (p) => <Icon {...p} path={<><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></>} />;
+        const ImagePlus = (p) => <Icon {...p} path={<><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><line x1="16" x2="22" y1="5" y2="5"/><line x1="19" x2="19" y1="2" y2="8"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></>} />;
+        const Eye = (p) => <Icon {...p} path={<><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></>} />;
+        const EyeOff = (p) => <Icon {...p} path={<><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></>} />;
+        const PlayCircle = (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></>} />;
+        const Loader = (p) => <Icon {...p} path={<path d="M21 12a9 9 0 1 1-6.219-8.56" className="animate-spin" />} />;
 
         function InstagramBattle() {
-            const [gameState, setGameState] = useState('setup'); 
-            const [fighters, setFighters] = useState([]); // Usado apenas para renderização inicial e vencedor
+            const [gameState, setGameState] = useState('setup'); // setup, loading, fighting, winner
+            const [fighters, setFighters] = useState([]);
             const [logs, setLogs] = useState([]);
             const [inputNames, setInputNames] = useState('');
             const [speed, setSpeed] = useState(1);
             const [winner, setWinner] = useState(null);
             const [isMuted, setIsMuted] = useState(false);
             const [isRecording, setIsRecording] = useState(false);
-            const [cinemaMode, setCinemaMode] = useState(false); // Novo modo Cinema
+            const [cinemaMode, setCinemaMode] = useState(false);
             const [localImages, setLocalImages] = useState({});
             
+            // Loading State
+            const [loadProgress, setLoadProgress] = useState(0);
+            const [totalToLoad, setTotalToLoad] = useState(0);
+            const [loadedCount, setLoadedCount] = useState(0);
+
             const arenaRef = useRef(null);
             const animationFrame = useRef(null);
-            const fightersRef = useRef([]); // A fonte da verdade para física
+            const fightersRef = useRef([]);
             const mediaRecorderRef = useRef(null);
             const chunksRef = useRef([]);
 
-            // Physics Helper
+            // --- Física ---
             const checkCollision = (f1, f2) => {
                 const dx = (f2.x + f2.size/2) - (f1.x + f1.size/2);
                 const dy = (f2.y + f2.size/2) - (f1.y + f1.size/2);
@@ -179,87 +124,150 @@
                 return { collided: false };
             };
 
-            const handleFileUpload = (event) => {
-                const file = event.target.files[0];
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
                 if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (e) => setInputNames(e.target.result);
-                reader.readAsText(file);
+                const r = new FileReader();
+                r.onload = (ev) => setInputNames(ev.target.result);
+                r.readAsText(file);
             };
 
-            const handleImageUpload = (event) => {
-                const files = Array.from(event.target.files);
+            const handleImageUpload = (e) => {
+                const files = Array.from(e.target.files);
                 if (files.length === 0) return;
                 const newImages = { ...localImages };
                 files.forEach(file => {
-                    const nameKey = file.name.split('.')[0].toLowerCase().trim().replace(/[\s-]/g, '_');
-                    newImages[nameKey] = URL.createObjectURL(file);
-                    newImages[file.name.split('.')[0].trim()] = URL.createObjectURL(file);
+                    const k = file.name.split('.')[0].toLowerCase().trim().replace(/[\s-]/g, '_');
+                    const url = URL.createObjectURL(file);
+                    newImages[k] = url;
+                    newImages[file.name.split('.')[0].trim()] = url;
                 });
                 setLocalImages(newImages);
                 alert(`${files.length} imagens carregadas!`);
             };
 
-            const handleStart = () => {
+            // --- Etapa 1: Preparação (Parsing) ---
+            const handlePrepare = () => {
                 if (audioCtx.state === 'suspended') audioCtx.resume();
                 const rawLines = inputNames.split('\n');
-                const processedFighters = [];
+                const parsed = [];
 
                 rawLines.forEach((line) => {
                     const trimmed = line.trim();
                     if (!trimmed) return;
-                    const separator = trimmed.includes(';') ? ';' : ',';
-                    let parts = separator === ';' ? trimmed.split(';') : trimmed.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                    const sep = trimmed.includes(';') ? ';' : ',';
+                    let parts = sep === ';' ? trimmed.split(';') : trimmed.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
                     
-                    let name = '', customImage = null;
+                    let name = '', avatar = null;
 
-                    if (parts.length >= 7) { // Formato Exportado
-                        const colUser = parts[1]?.trim().replace(/^"|"$/g, '');
-                        let rawUrl = parts[6]?.trim().replace(/^"|"$/g, '');
-                        if (!rawUrl?.startsWith('http')) {
+                    if (parts.length >= 7) { 
+                        // Formato Exportado
+                        if (parts[1]?.toLowerCase().includes('username') || parts[0].toLowerCase().includes('user id')) return;
+                        name = parts[1]?.trim().replace(/^"|"$/g, '').replace('@', '');
+                        let url = parts[6]?.trim().replace(/^"|"$/g, '');
+                        if (!url?.startsWith('http')) {
                             const found = parts.find(p => p && p.trim().replace(/^"|"$/g, '').startsWith('http'));
-                            if (found) rawUrl = found.trim().replace(/^"|"$/g, '');
+                            if (found) url = found.trim().replace(/^"|"$/g, '');
                         }
-                        if (colUser?.toLowerCase() === 'username' || parts[0].toLowerCase().includes('user id')) return;
-                        name = colUser?.replace('@', '');
-                        if (rawUrl) customImage = rawUrl.replace(/&amp;/g, '&');
+                        if (url) avatar = url.replace(/&amp;/g, '&');
                     } else if (parts.length >= 2) {
                         name = parts[0].trim().replace(/^"|"$/g, '').replace('@', '');
-                        const rawUrl = parts.slice(1).join(separator).trim().replace(/^"|"$/g, '');
-                        if (rawUrl.startsWith('http')) customImage = rawUrl.replace(/&amp;/g, '&');
+                        const url = parts.slice(1).join(sep).trim().replace(/^"|"$/g, '');
+                        if (url.startsWith('http')) avatar = url.replace(/&amp;/g, '&');
                     } else {
                         name = trimmed.replace(/^"|"$/g, '').replace('@', '');
                     }
 
-                    const nameKey = name.toLowerCase().trim().replace(/[\s-]/g, '_');
-                    if (localImages[name] || localImages[nameKey]) customImage = localImages[name] || localImages[nameKey];
+                    const k = name?.toLowerCase().trim().replace(/[\s-]/g, '_');
+                    if (localImages[name] || localImages[k]) avatar = localImages[name] || localImages[k];
 
-                    if (name.length > 0) processedFighters.push({ name, customImage });
+                    if (name) parsed.push({ name, rawAvatar: avatar });
                 });
                 
-                if (processedFighters.length < 2) { alert("Adicione pelo menos 2 competidores!"); return; }
+                if (parsed.length < 2) { alert("Mínimo 2 competidores!"); return; }
 
-                const currentW = arenaRef.current ? arenaRef.current.offsetWidth : window.innerWidth;
-                const currentH = arenaRef.current ? arenaRef.current.offsetHeight : window.innerHeight;
+                setFighters(parsed); // Temporário
+                setTotalToLoad(parsed.length);
+                setLoadedCount(0);
+                setLoadProgress(0);
+                setGameState('loading');
+            };
 
-                const newFighters = processedFighters.map((data, index) => ({
-                    id: index,
-                    name: data.name,
-                    hp: 100,
-                    maxHp: 100,
-                    avatar: data.customImage || DEFAULT_AVATAR,
-                    isHit: false,
-                    lastDamage: 0,
-                    hitCooldown: 0,
-                    x: Math.random() * (currentW - 80),
-                    y: Math.random() * (currentH - 80),
-                    vx: (Math.random() - 0.5) * 8,
-                    vy: (Math.random() - 0.5) * 8,
-                    size: 60
-                }));
+            // --- Etapa 2: Carregamento de Imagens (Preloader) ---
+            useEffect(() => {
+                if (gameState === 'loading') {
+                    let loaded = 0;
+                    const processedFighters = [];
 
-                fightersRef.current = newFighters;
-                setFighters(newFighters);
+                    // Função auxiliar para carregar imagem
+                    const preloadImage = (fighter) => {
+                        return new Promise((resolve) => {
+                            const done = (finalUrl) => {
+                                loaded++;
+                                setLoadedCount(loaded);
+                                setLoadProgress((loaded / fighters.length) * 100);
+                                resolve({ ...fighter, finalAvatar: finalUrl });
+                            };
+
+                            if (!fighter.rawAvatar) {
+                                done(DEFAULT_AVATAR);
+                                return;
+                            }
+
+                            if (fighter.rawAvatar.startsWith('blob:')) {
+                                done(fighter.rawAvatar);
+                                return;
+                            }
+
+                            // 1. Tenta Original
+                            const img = new Image();
+                            img.src = fighter.rawAvatar;
+                            img.onload = () => done(fighter.rawAvatar);
+                            img.onerror = () => {
+                                // 2. Tenta Proxy
+                                const encoded = encodeURIComponent(fighter.rawAvatar);
+                                const proxyUrl = `https://wsrv.nl/?url=${encoded}&w=150&h=150&fit=cover&output=webp&q=80`;
+                                const imgProxy = new Image();
+                                imgProxy.src = proxyUrl;
+                                imgProxy.onload = () => done(proxyUrl);
+                                imgProxy.onerror = () => {
+                                    // 3. Falhou tudo -> Default
+                                    done(DEFAULT_AVATAR);
+                                };
+                            };
+                        });
+                    };
+
+                    // Inicia carregamento paralelo
+                    Promise.all(fighters.map(f => preloadImage(f))).then((results) => {
+                        // Inicializa posições para a batalha
+                        const currentW = arenaRef.current ? arenaRef.current.offsetWidth : window.innerWidth;
+                        const currentH = arenaRef.current ? arenaRef.current.offsetHeight : window.innerHeight;
+                        
+                        const readyFighters = results.map((f, i) => ({
+                            id: i,
+                            name: f.name,
+                            avatar: f.finalAvatar, // URL GARANTIDA E CARREGADA
+                            hp: 100,
+                            maxHp: 100,
+                            isHit: false,
+                            hitCooldown: 0,
+                            x: Math.random() * (currentW - 80),
+                            y: Math.random() * (currentH - 80),
+                            vx: (Math.random() - 0.5) * 8,
+                            vy: (Math.random() - 0.5) * 8,
+                            size: 60
+                        }));
+                        
+                        fightersRef.current = readyFighters;
+                        setFighters(readyFighters); // Atualiza estado visual
+                        // Não muda gameState automaticamente, espera o usuário clicar Play
+                    });
+                }
+            }, [gameState]);
+
+            // --- Etapa 3: Iniciar Batalha ---
+            const startBattle = () => {
                 setLogs(["A ARENA ESTÁ ABERTA!"]);
                 setGameState('fighting');
             };
@@ -269,7 +277,7 @@
                 setInputNames(demoData.join('\n'));
             };
 
-            // --- ANIMATION LOOP OTIMIZADO (SEM REACT RERENDER) ---
+            // Loop de Animação Otimizado
             const animate = useCallback(() => {
                 if (gameState !== 'fighting') return;
 
@@ -280,7 +288,6 @@
                 let aliveCount = 0;
                 let potentialWinner = null;
 
-                // 1. Movimento e Atualização DOM Direta
                 allFighters.forEach(f => {
                     if (f.hp > 0) {
                         aliveCount++;
@@ -295,34 +302,26 @@
                         if (f.y <= 0) { f.y = 0; f.vy *= -1; }
                         if (f.y >= currentH - f.size) { f.y = currentH - f.size; f.vy *= -1; }
 
-                        // Manipulação Direta do DOM (Zero React Lag)
                         const el = document.getElementById(`fighter-${f.id}`);
-                        if (el) {
-                            el.style.transform = `translate(${f.x}px, ${f.y}px)`;
-                            // Ocultar se morto (embora a logica de render trate isso, para updates em tempo real é bom)
-                        }
+                        if (el) el.style.transform = `translate(${f.x}px, ${f.y}px)`;
                     }
                 });
 
-                // 2. Colisões
                 for (let i = 0; i < allFighters.length; i++) {
                     const f1 = allFighters[i];
                     if (f1.hp <= 0) continue;
-
                     for (let j = i + 1; j < allFighters.length; j++) {
                         const f2 = allFighters[j];
                         if (f2.hp <= 0) continue;
 
                         const { collided, dx, dy, distance } = checkCollision(f1, f2);
-
                         if (collided) {
                             const overlap = (f1.size - distance) / 2;
                             const normalX = dx / distance;
                             const normalY = dy / distance;
-
                             f1.x -= overlap * normalX; f1.y -= overlap * normalY;
                             f2.x += overlap * normalX; f2.y += overlap * normalY;
-
+                            
                             const tempVx = f1.vx; const tempVy = f1.vy;
                             f1.vx = f2.vx + (Math.random()-0.5); f1.vy = f2.vy + (Math.random()-0.5);
                             f2.vx = tempVx + (Math.random()-0.5); f2.vy = tempVy + (Math.random()-0.5);
@@ -331,53 +330,34 @@
                                 const dmg = Math.floor(Math.random() * 15) + 5;
                                 const roll = Math.random();
                                 let msg = "";
-
                                 if (roll < 0.45) {
                                     f2.hp = Math.max(0, f2.hp - dmg);
                                     msg = `@${f1.name} hit @${f2.name} (-${dmg})`;
                                     playHitSound(isMuted);
-                                    // Update visual HP
                                     const hpBar = document.getElementById(`hp-bar-${f2.id}`);
-                                    if(hpBar) hpBar.style.width = `${f2.hp}%`;
-                                    if(hpBar && f2.hp < 30) hpBar.style.backgroundColor = '#ef4444';
-                                    
+                                    if(hpBar) { hpBar.style.width = `${f2.hp}%`; if(f2.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
                                     if (f2.hp <= 0) {
                                         const elF2 = document.getElementById(`fighter-${f2.id}`);
-                                        if(elF2) {
-                                            elF2.style.opacity = '0.4';
-                                            elF2.style.filter = 'grayscale(100%)';
-                                            elF2.style.zIndex = '0';
-                                        }
+                                        if(elF2) { elF2.style.opacity = '0.4'; elF2.style.filter = 'grayscale(100%)'; elF2.style.zIndex = '0'; }
                                     }
                                 } else if (roll < 0.90) {
                                     f1.hp = Math.max(0, f1.hp - dmg);
                                     msg = `@${f2.name} hit @${f1.name} (-${dmg})`;
                                     playHitSound(isMuted);
                                     const hpBar = document.getElementById(`hp-bar-${f1.id}`);
-                                    if(hpBar) hpBar.style.width = `${f1.hp}%`;
-                                    if(hpBar && f1.hp < 30) hpBar.style.backgroundColor = '#ef4444';
-
+                                    if(hpBar) { hpBar.style.width = `${f1.hp}%`; if(f1.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
                                     if (f1.hp <= 0) {
                                         const elF1 = document.getElementById(`fighter-${f1.id}`);
-                                        if(elF1) {
-                                            elF1.style.opacity = '0.4';
-                                            elF1.style.filter = 'grayscale(100%)';
-                                            elF1.style.zIndex = '0';
-                                        }
+                                        if(elF1) { elF1.style.opacity = '0.4'; elF1.style.filter = 'grayscale(100%)'; elF1.style.zIndex = '0'; }
                                     }
                                 } else {
-                                    // Choque
                                     const half = Math.floor(dmg/2);
-                                    f1.hp = Math.max(0, f1.hp - half);
-                                    f2.hp = Math.max(0, f2.hp - half);
+                                    f1.hp = Math.max(0, f1.hp - half); f2.hp = Math.max(0, f2.hp - half);
                                     msg = "CHOQUE!";
                                     playHitSound(isMuted);
-                                    const hp1 = document.getElementById(`hp-bar-${f1.id}`);
-                                    if(hp1) hp1.style.width = `${f1.hp}%`;
-                                    const hp2 = document.getElementById(`hp-bar-${f2.id}`);
-                                    if(hp2) hp2.style.width = `${f2.hp}%`;
+                                    const hp1 = document.getElementById(`hp-bar-${f1.id}`); if(hp1) hp1.style.width = `${f1.hp}%`;
+                                    const hp2 = document.getElementById(`hp-bar-${f2.id}`); if(hp2) hp2.style.width = `${f2.hp}%`;
                                 }
-
                                 f1.hitCooldown = 30; f2.hitCooldown = 30;
                                 if (msg) setLogs(prev => [msg, ...prev.slice(0, 2)]);
                             }
@@ -385,21 +365,17 @@
                     }
                 }
 
-                // Check Win
                 if (aliveCount <= 1 && allFighters.length > 1 && potentialWinner) {
                     setWinner(potentialWinner);
                     setGameState('winner');
                     playWinSound(isMuted);
                     return;
                 }
-
                 animationFrame.current = requestAnimationFrame(animate);
             }, [gameState, speed, isMuted]);
 
             useEffect(() => {
-                if (gameState === 'fighting') {
-                    animationFrame.current = requestAnimationFrame(animate);
-                }
+                if (gameState === 'fighting') animationFrame.current = requestAnimationFrame(animate);
                 return () => cancelAnimationFrame(animationFrame.current);
             }, [gameState, animate]);
 
@@ -414,11 +390,7 @@
             const toggleRecording = async () => {
                 if (!isRecording) {
                     try {
-                        const stream = await navigator.mediaDevices.getDisplayMedia({
-                            video: { mediaSource: 'screen', frameRate: 30 }, // 30fps para pesar menos
-                            audio: true, 
-                            preferCurrentTab: true
-                        });
+                        const stream = await navigator.mediaDevices.getDisplayMedia({ video: { mediaSource: 'screen', frameRate: 30 }, audio: true, preferCurrentTab: true });
                         const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
                         mediaRecorderRef.current = mediaRecorder;
                         chunksRef.current = [];
@@ -426,10 +398,7 @@
                         mediaRecorder.onstop = () => {
                             const blob = new Blob(chunksRef.current, { type: "video/webm" });
                             const url = URL.createObjectURL(blob);
-                            const a = document.createElement("a");
-                            a.href = url;
-                            a.download = `bate-bate-royale-${Date.now()}.webm`;
-                            a.click();
+                            const a = document.createElement("a"); a.href = url; a.download = `bate-bate-royale-${Date.now()}.webm`; a.click();
                             URL.revokeObjectURL(url);
                             setIsRecording(false);
                             stream.getTracks().forEach(t => t.stop());
@@ -438,18 +407,14 @@
                         setIsRecording(true);
                         stream.getVideoTracks()[0].onended = () => { if (mediaRecorder.state !== 'inactive') mediaRecorder.stop(); };
                     } catch (err) { console.error(err); }
-                } else {
-                    if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current.stop();
-                }
+                } else { if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current.stop(); }
             };
 
             return (
                 <div className="fixed inset-0 bg-black text-white font-sans overflow-hidden select-none">
                     
                     {/* Background Grid */}
-                    <div className="absolute inset-0 opacity-10 pointer-events-none" 
-                        style={{ backgroundImage: 'linear-gradient(#333 1px, transparent 1px), linear-gradient(90deg, #333 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
-                    </div>
+                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'linear-gradient(#333 1px, transparent 1px), linear-gradient(90deg, #333 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
 
                     {/* Header */}
                     <div className="absolute top-0 left-0 right-0 z-50 p-4 pointer-events-none flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent">
@@ -459,24 +424,17 @@
                             </h1>
                             {gameState === 'fighting' && (
                                 <div className="text-green-400 font-mono text-sm mt-1 bg-black/50 inline-block px-2 rounded backdrop-blur">
-                                    <span className="font-bold">Vivos:</span> <span id="alive-count">{fighters.length}</span>
+                                    <span className="font-bold">Vivos:</span> <span id="alive-count">{fighters.filter(f => f.hp > 0).length}</span>
                                 </div>
                             )}
                         </div>
 
-                        {/* Controls Group - Oculto no Modo Cinema */}
+                        {/* Controls Group */}
                         {!cinemaMode && (
                             <div className="flex gap-2 pointer-events-auto items-center animate-fade-in">
-                                <button onClick={toggleRecording} className={`p-2 rounded-lg transition border ${isRecording ? 'bg-red-600 border-red-500 text-white recording-pulse' : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white'}`} title="Gravar Tela">
-                                    {isRecording ? <Square size={20} fill="currentColor" /> : <Video size={20} />}
-                                </button>
-                                <button onClick={() => setIsMuted(!isMuted)} className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white transition" title="Som">
-                                    {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-                                </button>
-                                <button onClick={() => setCinemaMode(true)} className="bg-purple-600 p-2 rounded-lg text-white hover:bg-purple-500 transition" title="Modo Cinema (Ocultar Interface)">
-                                    <EyeOff size={20} />
-                                </button>
-
+                                <button onClick={toggleRecording} className={`p-2 rounded-lg transition border ${isRecording ? 'bg-red-600 border-red-500 text-white recording-pulse' : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white'}`} title="Gravar Tela">{isRecording ? <Square size={20} fill="currentColor" /> : <Video size={20} />}</button>
+                                <button onClick={() => setIsMuted(!isMuted)} className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white transition" title="Som">{isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
+                                <button onClick={() => setCinemaMode(true)} className="bg-purple-600 p-2 rounded-lg text-white hover:bg-purple-500 transition" title="Modo Cinema"><EyeOff size={20} /></button>
                                 {gameState === 'fighting' && (
                                     <div className="bg-gray-800 rounded-lg p-1 flex items-center gap-2 px-2 h-full">
                                         <button onClick={() => setSpeed(0.5)} className={`p-1.5 rounded text-xs font-bold ${speed===0.5?'bg-pink-600':'text-gray-400'}`}>0.5x</button>
@@ -486,12 +444,8 @@
                                 )}
                             </div>
                         )}
-
-                        {/* Botão Sair do Modo Cinema (Sempre visível se ativo, mas discreto) */}
                         {cinemaMode && (
-                            <button onClick={() => setCinemaMode(false)} className="pointer-events-auto bg-gray-800/50 hover:bg-gray-700 p-2 rounded-full text-gray-400 transition" title="Sair do Modo Cinema">
-                                <Eye size={20} />
-                            </button>
+                            <button onClick={() => setCinemaMode(false)} className="pointer-events-auto bg-gray-800/50 hover:bg-gray-700 p-2 rounded-full text-gray-400 transition" title="Sair do Modo Cinema"><Eye size={20} /></button>
                         )}
                     </div>
 
@@ -500,48 +454,65 @@
                         <div className="relative z-50 flex items-center justify-center h-full p-4">
                             <div className="w-full max-w-2xl bg-gray-900/90 backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-gray-700 flex flex-col gap-4">
                                 <h2 className="text-2xl font-bold text-center">Configurar Arena</h2>
-                                
                                 <div className="flex gap-4 w-full">
-                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-pink-500 transition">
+                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-pink-500 transition relative">
                                         <label className="flex flex-col items-center cursor-pointer group h-full justify-center">
                                             <div className="flex items-center gap-2 text-pink-400 group-hover:text-pink-300 transition"><FileUp size={24}/><span className="font-bold text-sm">Lista (.txt/.csv)</span></div>
                                             <input type="file" accept=".txt,.csv" onChange={handleFileUpload} className="hidden"/>
                                         </label>
                                     </div>
-                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-green-500 transition">
+                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-green-500 transition relative">
                                         <label className="flex flex-col items-center cursor-pointer group h-full justify-center">
                                             <div className="flex items-center gap-2 text-green-400 group-hover:text-green-300 transition"><ImagePlus size={24}/><span className="font-bold text-sm">Fotos Locais</span></div>
                                             <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden"/>
                                         </label>
                                     </div>
                                 </div>
-
                                 <textarea value={inputNames} onChange={(e) => setInputNames(e.target.value)} className="w-full h-40 bg-black/50 border border-gray-600 rounded-lg p-3 text-white outline-none font-mono text-xs resize-none" placeholder={`@usuario1\n@usuario2, https://site.com/foto.jpg`}/>
-                                
                                 <div className="flex gap-4">
-                                    <button onClick={handleStart} className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 py-4 rounded-xl font-bold shadow-lg transition hover:scale-105">INICIAR</button>
+                                    <button onClick={handlePrepare} className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 py-4 rounded-xl font-bold shadow-lg transition hover:scale-105">PREPARAR BATALHA</button>
                                     <button onClick={loadDemo} className="px-6 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold text-gray-300">Demo</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Arena (Renderização Inicial única) */}
+                    {/* Loading Screen */}
+                    {gameState === 'loading' && (
+                        <div className="relative z-50 flex flex-col items-center justify-center h-full p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+                            <div className="w-full max-w-md bg-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700 text-center">
+                                <h2 className="text-2xl font-bold mb-2">Carregando Recursos</h2>
+                                <p className="text-gray-400 text-sm mb-6">Processando imagens: {loadedCount} / {totalToLoad}</p>
+                                
+                                {/* Progress Bar */}
+                                <div className="w-full h-4 bg-gray-700 rounded-full overflow-hidden mb-8">
+                                    <div className="h-full bg-gradient-to-r from-pink-500 to-yellow-500 loader-bar" style={{ width: `${loadProgress}%` }}></div>
+                                </div>
+
+                                <button 
+                                    onClick={startBattle} 
+                                    disabled={loadProgress < 100}
+                                    className={`w-full py-4 rounded-xl font-bold text-xl flex items-center justify-center gap-2 transition transform 
+                                        ${loadProgress >= 100 
+                                            ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105 shadow-lg text-white cursor-pointer' 
+                                            : 'bg-gray-700 text-gray-500 cursor-not-allowed grayscale'}`}
+                                >
+                                    {loadProgress < 100 ? (
+                                        <> <Loader size={24} /> AGUARDE... </>
+                                    ) : (
+                                        <> <PlayCircle size={28} /> INICIAR BATALHA </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Arena */}
                     <div ref={arenaRef} className="absolute inset-0 overflow-hidden">
-                        {fighters.map((f) => (
-                            <div
-                                key={f.id}
-                                id={`fighter-${f.id}`}
-                                className="absolute flex flex-col items-center justify-center fighter-container"
-                                style={{
-                                    width: `${f.size}px`,
-                                    // A posição será controlada via JS direto no DOM para performance
-                                    transform: `translate(${f.x}px, ${f.y}px)`,
-                                    zIndex: 10
-                                }}
-                            >
+                        {(gameState === 'fighting' || gameState === 'winner') && fighters.map((f) => (
+                            <div key={f.id} id={`fighter-${f.id}`} className="absolute flex flex-col items-center justify-center fighter-container" style={{ width: `${f.size}px`, transform: `translate(${f.x}px, ${f.y}px)`, zIndex: 10 }}>
                                 <div className="relative w-full aspect-square rounded-full border-4 border-white/20 overflow-hidden shadow-xl bg-gray-800">
-                                    <FighterAvatar url={f.avatar} name={f.name} />
+                                    <img src={f.avatar} alt={f.name} className="w-full h-full object-cover" />
                                 </div>
                                 <div className="absolute -bottom-6 w-24 flex flex-col items-center">
                                     <span className="text-[10px] font-bold text-white drop-shadow-md truncate max-w-full bg-black/40 px-1 rounded mb-0.5">{f.name}</span>
@@ -568,7 +539,7 @@
                                 <h2 className="text-4xl font-black text-white mb-2">VENCEDOR</h2>
                                 <div className="my-8 relative group">
                                     <div className="w-48 h-48 rounded-full border-4 border-yellow-400 overflow-hidden mx-auto shadow-xl bg-gray-800">
-                                        <FighterAvatar url={winner.avatar} name={winner.name} />
+                                        <img src={winner.avatar} alt={winner.name} className="w-full h-full object-cover" />
                                     </div>
                                 </div>
                                 <h3 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-400 mb-8">{winner.name}</h3>
