@@ -52,6 +52,7 @@
         // --- Firebase State Global ---
         let db = null;
         let auth = null;
+        let globalAppId = 'default-app-id'; 
 
         const initFirebase = async () => {
             if (window.firebaseInitialized) return;
@@ -59,18 +60,18 @@
 
             const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, getFirestore } = window.firebaseModules;
             try {
-                const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
-                const app = initializeApp(firebaseConfig);
-                auth = getAuth(app);
-                db = getFirestore(app);
-
-                if (window.__initial_auth_token) {
-                    await signInWithCustomToken(auth, window.__initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
+                const configString = window.__firebase_config || '{}';
+                const firebaseConfig = JSON.parse(configString);
+                globalAppId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
+                
+                if (Object.keys(firebaseConfig).length > 0) {
+                    const app = initializeApp(firebaseConfig);
+                    auth = getAuth(app);
+                    db = getFirestore(app);
+                    if (window.__initial_auth_token) await signInWithCustomToken(auth, window.__initial_auth_token);
+                    else await signInAnonymously(auth);
+                    window.firebaseInitialized = true;
                 }
-                window.firebaseInitialized = true;
-                console.log("Firebase Conectado. User:", auth.currentUser?.uid);
             } catch (e) { console.error("Erro Firebase:", e); }
         };
 
@@ -149,6 +150,7 @@
             const [isRecording, setIsRecording] = useState(false);
             const [cinemaMode, setCinemaMode] = useState(false);
             const [localImages, setLocalImages] = useState({});
+            const [showSaveOptions, setShowSaveOptions] = useState(false); // Novo estado para controlar a visualização
             
             const [loadProgress, setLoadProgress] = useState(0);
             const [totalToLoad, setTotalToLoad] = useState(0);
@@ -340,6 +342,7 @@
                     potentialWinner.eliminationOrder = eliminationCounter.current;
                     setWinner(potentialWinner);
                     setGameState('winner');
+                    setShowSaveOptions(false); // Reset to show clean winner first
                     playWinSound(isMuted);
                     const sorted = [...allFighters].sort((a, b) => b.eliminationOrder - a.eliminationOrder);
                     setFinalRanking(sorted);
@@ -351,7 +354,16 @@
 
             useEffect(() => { if (gameState === 'fighting') animationFrame.current = requestAnimationFrame(animate); return () => cancelAnimationFrame(animationFrame.current); }, [gameState, animate]);
 
-            const resetGame = () => { setGameState('setup'); setWinner(null); setLogs([]); setFighters([]); fightersRef.current = []; setFinalRanking([]); setIsSaving(false); };
+            const resetGame = () => { 
+                setGameState('setup'); 
+                setWinner(null); 
+                setLogs([]); 
+                setFighters([]); 
+                fightersRef.current = []; 
+                setFinalRanking([]); 
+                setIsSaving(false); 
+                setShowSaveOptions(false); 
+            };
 
             const saveRankingToFirebase = async () => {
                 if (!db || isSaving) return;
@@ -366,13 +378,13 @@
                 try {
                     const { collection, addDoc, serverTimestamp } = window.firebaseModules;
                     
-                    const appId = window.__app_id || 'default-app-id';
                     const userId = auth.currentUser.uid;
 
                     // Write to PUBLIC data as requested
                     const simpleRanking = finalRanking.map((f, index) => ({ position: index + 1, name: f.name, avatar: f.avatar }));
                     
-                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'battles'), { 
+                    // Usa a variável globalAppId capturada na inicialização para garantir consistência
+                    await addDoc(collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles'), { 
                         name: battleName, 
                         date: serverTimestamp(), 
                         winner: winner.name, 
@@ -422,9 +434,8 @@
                 if (!db) return;
                 const { collection, getDocs, query, orderBy } = window.firebaseModules;
                 try {
-                    const appId = window.__app_id || 'default-app-id';
                     // Using Public path correctly without orderBy if permissions fail
-                    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'battles'));
+                    const q = query(collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles'));
                     const snapshot = await getDocs(q);
                     const battles = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
                     // Sort in memory
@@ -522,14 +533,14 @@
                                                 {selectedBattle.ranking.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).map((player) => (
                                                     <div key={player.position} className={`flex items-center gap-4 p-3 rounded-lg border ${player.position === 1 ? 'bg-yellow-500/10 border-yellow-500' : 'bg-gray-800 border-gray-700'}`}>
                                                         <div className={`font-bold text-xl w-8 text-center ${player.position === 1 ? 'text-yellow-400' : player.position === 2 ? 'text-gray-300' : player.position === 3 ? 'text-orange-400' : 'text-gray-500'}`}>{player.position}</div>
-                                                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-gray-600"><img src={player.avatar || DEFAULT_AVATAR} className="w-full h-full object-cover" onError={(e) => e.target.src = DEFAULT_AVATAR}/></div>
+                                                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-gray-600"><FighterAvatar url={player.avatar || DEFAULT_AVATAR} name={player.name} /></div>
                                                         <div className="font-bold truncate text-white">@{player.name}</div>
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
                                     </>
-                                ) : <div className="flex items-center justify-center h-full text-gray-500">Selecione uma batalha.</div>}
+                                ) : <div className="flex items-center justify-center h-full text-gray-500">Selecione uma batalha para ver o ranking completo.</div>}
                             </div>
                         </div>
                     )}
@@ -551,7 +562,7 @@
                         {(gameState === 'fighting' || gameState === 'winner') && fighters.map((f) => (
                             <div key={f.id} id={`fighter-${f.id}`} className="absolute flex flex-col items-center justify-center fighter-container" style={{ width: `${f.size}px`, transform: `translate(${f.x}px, ${f.y}px)`, zIndex: 10 }}>
                                 <div className="relative w-full aspect-square rounded-full border-4 border-white/20 overflow-hidden shadow-xl bg-gray-800">
-                                    <img src={f.avatar} alt={f.name} className="w-full h-full object-cover" />
+                                    <FighterAvatar url={f.avatar} name={f.name} />
                                 </div>
                                 <div className="absolute -bottom-6 w-24 flex flex-col items-center"><span className="text-[10px] font-bold text-white drop-shadow-md truncate max-w-full bg-black/40 px-1 rounded mb-0.5">{f.name}</span><div className="w-full h-1.5 bg-gray-800 rounded-full border border-gray-600 overflow-hidden"><div id={`hp-bar-${f.id}`} className="h-full bg-green-500 transition-colors duration-300" style={{ width: '100%' }}></div></div></div>
                             </div>
@@ -563,22 +574,39 @@
                     )}
 
                     {gameState === 'winner' && winner && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 animate-fade-in p-4 overflow-y-auto">
-                            <div className="text-center w-full max-w-md">
-                                <div className="relative inline-block mb-4"><Trophy className="w-24 h-24 text-yellow-400 animate-bounce" /></div>
-                                <h2 className="text-3xl font-black text-white mb-2">VENCEDOR</h2>
-                                <div className="my-4 relative group"><div className="w-32 h-32 rounded-full border-4 border-yellow-400 overflow-hidden mx-auto shadow-xl bg-gray-800"><img src={winner.avatar} alt={winner.name} className="w-full h-full object-cover" /></div></div>
-                                <h3 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-400 mb-6">{winner.name}</h3>
-                                <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col gap-3 mb-6">
-                                    <h4 className="text-gray-400 text-sm font-bold uppercase">Salvar Ranking</h4>
-                                    <input type="text" value={battleName} onChange={(e) => setBattleName(e.target.value)} className="bg-gray-900 border border-gray-600 rounded p-2 text-white text-center focus:border-pink-500 focus:outline-none" placeholder="Nome (ex: Dia 25)" />
-                                    <div className="flex gap-2">
-                                        <button onClick={saveRankingToFirebase} disabled={isSaving} className="flex-1 bg-green-600 hover:bg-green-500 text-white p-2 rounded font-bold flex items-center justify-center gap-2">{isSaving ? "Salvando..." : <><Save size={18}/> Salvar</>}</button>
-                                        <button onClick={copyRankingForBio} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white p-2 rounded font-bold flex items-center justify-center gap-2"><Copy size={18}/> Copiar Bio</button>
+                        <div 
+                            onClick={() => !showSaveOptions && setShowSaveOptions(true)}
+                            className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 animate-fade-in p-4 overflow-y-auto cursor-pointer"
+                        >
+                            {!showSaveOptions ? (
+                                <div className="text-center w-full max-w-md pointer-events-none">
+                                    <div className="relative inline-block mb-6"><Trophy className="w-32 h-32 text-yellow-400 animate-bounce" /></div>
+                                    <h2 className="text-4xl font-black text-white mb-4">VENCEDOR</h2>
+                                    <div className="my-6 relative group">
+                                        <div className="w-48 h-48 rounded-full border-8 border-yellow-400 overflow-hidden mx-auto shadow-[0_0_50px_rgba(250,204,21,0.5)] bg-gray-800">
+                                            <FighterAvatar url={winner.avatar} name={winner.name} />
+                                        </div>
                                     </div>
+                                    <h3 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-400 mb-8">{winner.name}</h3>
+                                    <p className="text-gray-500 text-sm animate-pulse">Toque em qualquer lugar para continuar</p>
                                 </div>
-                                <button onClick={resetGame} className="bg-white text-black hover:bg-gray-200 px-8 py-3 rounded-full font-bold flex items-center gap-2 mx-auto"><RotateCcw size={20}/> Novo Jogo</button>
-                            </div>
+                            ) : (
+                                <div onClick={(e) => e.stopPropagation()} className="text-center w-full max-w-md cursor-auto">
+                                    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col gap-3 mb-6 shadow-2xl">
+                                        <h4 className="text-gray-400 text-sm font-bold uppercase mb-2">Salvar Ranking</h4>
+                                        <div className="flex items-center justify-center gap-3 mb-4 bg-gray-900 p-2 rounded">
+                                            <div className="w-10 h-10 rounded-full overflow-hidden border border-yellow-500"><FighterAvatar url={winner.avatar} name={winner.name} /></div>
+                                            <span className="font-bold text-yellow-400">@{winner.name}</span>
+                                        </div>
+                                        <input type="text" value={battleName} onChange={(e) => setBattleName(e.target.value)} className="bg-gray-900 border border-gray-600 rounded p-3 text-white text-center focus:border-pink-500 focus:outline-none" placeholder="Nome da Batalha (ex: Dia 25)" />
+                                        <div className="flex gap-2 mt-2">
+                                            <button onClick={saveRankingToFirebase} disabled={isSaving} className="flex-1 bg-green-600 hover:bg-green-500 text-white p-3 rounded font-bold flex items-center justify-center gap-2 transition hover:scale-105">{isSaving ? "Salvando..." : <><Save size={18}/> Salvar</>}</button>
+                                            <button onClick={copyRankingForBio} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white p-3 rounded font-bold flex items-center justify-center gap-2 transition hover:scale-105"><Copy size={18}/> Bio</button>
+                                        </div>
+                                    </div>
+                                    <button onClick={resetGame} className="bg-white text-black hover:bg-gray-200 px-8 py-3 rounded-full font-bold flex items-center gap-2 mx-auto transition hover:scale-105"><RotateCcw size={20}/> Novo Jogo</button>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
