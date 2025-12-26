@@ -74,23 +74,56 @@
             const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, getFirestore } = window.firebaseModules;
             try {
                 let firebaseConfig = JSON.parse(window.__firebase_config || '{}');
-                if (Object.keys(firebaseConfig).length === 0 && MY_FIREBASE_CONFIG.apiKey) {
+                let useManualConfig = false;
+
+                // Força o uso da configuração manual se ela existir (para GitHub/Hosting externo)
+                if (MY_FIREBASE_CONFIG.apiKey && MY_FIREBASE_CONFIG.apiKey.length > 5) {
                     firebaseConfig = MY_FIREBASE_CONFIG;
+                    useManualConfig = true;
+                    console.log("Usando configuração manual do Firebase (haking-251e5).");
                 }
-                globalAppId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
                 
-                if (Object.keys(firebaseConfig).length > 0) {
-                    const app = initializeApp(firebaseConfig);
-                    auth = getAuth(app);
-                    db = getFirestore(app);
-                    if (window.__initial_auth_token) await signInWithCustomToken(auth, window.__initial_auth_token);
-                    else await signInAnonymously(auth);
-                    window.firebaseInitialized = true;
-                    console.log("Firebase Conectado!");
-                } else {
+                // Se ainda não tiver config, avisa
+                if (!firebaseConfig.apiKey) {
                     console.warn("Sem configuração do Firebase (Modo Offline)");
+                    return;
                 }
-            } catch (e) { console.error("Erro Firebase (Usando Offline):", e); }
+
+                // Define o ID do App para o caminho do Firestore
+                if (useManualConfig) {
+                    globalAppId = firebaseConfig.projectId; // Usa o ID do seu projeto para organizar os dados
+                } else {
+                    globalAppId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
+                }
+                
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app); 
+
+                try {
+                    // CORREÇÃO CRÍTICA DE AUTH:
+                    // Se estiver usando sua config manual, força login anônimo e ignora o token do ambiente
+                    if (useManualConfig) {
+                        await signInAnonymously(auth);
+                        console.log("Login Anônimo realizado no seu projeto.");
+                    } else if (window.__initial_auth_token) {
+                        // Só usa o token customizado se estiver no ambiente de teste original
+                        await signInWithCustomToken(auth, window.__initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    
+                    console.log("Firebase Autenticado! UID:", auth.currentUser?.uid);
+                } catch (authError) {
+                    console.error("Erro Autenticação:", authError);
+                    alert("Erro de Autenticação no Firebase:\n" + authError.message);
+                }
+
+                window.firebaseInitialized = true;
+            } catch (e) { 
+                console.error("Erro Inicialização Firebase:", e);
+                alert("Erro ao iniciar Firebase: " + e.message);
+            }
         };
 
         const playHitSound = (muted) => {
@@ -389,7 +422,7 @@
                 };
 
                 try {
-                    // 1. Tentar salvar no Firebase se disponível
+                    // Tenta salvar no Firebase se disponível
                     if (db && auth && auth.currentUser) {
                         const { collection, addDoc, serverTimestamp } = window.firebaseModules;
                         const userId = auth.currentUser.uid;
@@ -405,7 +438,6 @@
                         throw new Error("Modo Offline");
                     }
                 } catch (e) { 
-                    // 2. Fallback para LocalStorage
                     console.log("Salvando localmente devido a:", e);
                     const saved = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
                     saved.push(newBattle);
@@ -413,6 +445,25 @@
                     alert("Ranking salvo LOCALMENTE (Não configurado na nuvem ou erro de conexão)."); 
                 }
                 setIsSaving(false);
+            };
+
+            const deleteRanking = async (id, e) => {
+                e.stopPropagation();
+                if (!confirm("Tem certeza que deseja excluir este ranking?")) return;
+                
+                if (id.startsWith('local-')) {
+                    const saved = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
+                    const filtered = saved.filter(b => b.id !== id);
+                    localStorage.setItem('batebate_rankings', JSON.stringify(filtered));
+                    setSavedBattles(prev => prev.filter(b => b.id !== id));
+                } else if (db) {
+                    try {
+                        const { deleteDoc, doc } = window.firebaseModules;
+                        await deleteDoc(doc(db, 'artifacts', globalAppId, 'public', 'data', 'battles', id));
+                        setSavedBattles(prev => prev.filter(b => b.id !== id));
+                    } catch (err) { console.error(err); alert("Erro ao excluir da nuvem."); }
+                }
+                if (selectedBattle?.id === id) setSelectedBattle(null);
             };
 
             const publishToCloud = async (battle, e) => {
@@ -449,25 +500,6 @@
                 }
             };
 
-            const deleteRanking = async (id, e) => {
-                e.stopPropagation();
-                if (!confirm("Tem certeza que deseja excluir este ranking?")) return;
-                
-                if (id.startsWith('local-')) {
-                    const saved = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
-                    const filtered = saved.filter(b => b.id !== id);
-                    localStorage.setItem('batebate_rankings', JSON.stringify(filtered));
-                    setSavedBattles(prev => prev.filter(b => b.id !== id));
-                } else if (db) {
-                    try {
-                        const { deleteDoc, doc } = window.firebaseModules;
-                        await deleteDoc(doc(db, 'artifacts', globalAppId, 'public', 'data', 'battles', id));
-                        setSavedBattles(prev => prev.filter(b => b.id !== id));
-                    } catch (err) { console.error(err); alert("Erro ao excluir da nuvem."); }
-                }
-                if (selectedBattle?.id === id) setSelectedBattle(null);
-            };
-
             const copyRankingForBio = () => {
                 const top5 = finalRanking.slice(0, 5);
                 let text = `👑 Batalha Royale: ${battleName}\n\n`;
@@ -501,13 +533,11 @@
                 setGameState('ranking_browser');
                 let allBattles = [];
 
-                // 1. Carregar do LocalStorage
                 try {
                     const localData = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
                     allBattles = [...localData];
                 } catch(e) { console.error("Erro localStorage", e); }
 
-                // 2. Carregar do Firebase (se disponível)
                 if (db && auth && auth.currentUser) {
                     const { collection, getDocs, query, orderBy } = window.firebaseModules;
                     try {
@@ -518,7 +548,6 @@
                     } catch (e) { console.error(e); }
                 }
 
-                // Sort
                 allBattles.sort((a,b) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
                 setSavedBattles(allBattles);
             };
