@@ -45,7 +45,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef, useCallback } = React;
+        const { useState, useEffect, useRef, useCallback, memo } = React;
 
         // Imagem padrão estilo Instagram (Silhueta Cinza)
         const DEFAULT_AVATAR = "https://upload.wikimedia.org/wikipedia/commons/a/ac/Default_pfp.jpg";
@@ -103,6 +103,42 @@
                 osc.stop(now + offset + 0.5);
             });
         };
+
+        // --- Componente de Avatar Inteligente (Tenta Proxy se falhar) ---
+        // Memoizado para evitar re-render desnecessário durante animação
+        const FighterAvatar = memo(({ url, name }) => {
+            const [imgSrc, setImgSrc] = useState(url);
+            const [retryStage, setRetryStage] = useState(0); // 0: Original, 1: Proxy, 2: Default
+
+            useEffect(() => {
+                setImgSrc(url);
+                setRetryStage(0);
+            }, [url]);
+
+            const handleError = () => {
+                if (retryStage === 0) {
+                    // Tenta usar o serviço wsrv.nl como proxy para bypassar CORS do Instagram
+                    // &output=jpg garante formato compatível
+                    const encodedUrl = encodeURIComponent(url);
+                    setImgSrc(`https://wsrv.nl/?url=${encodedUrl}&w=150&h=150&fit=cover&output=jpg`);
+                    setRetryStage(1);
+                } else {
+                    // Se falhar o proxy, usa o avatar padrão
+                    setImgSrc(DEFAULT_AVATAR);
+                    setRetryStage(2);
+                }
+            };
+
+            return (
+                <img 
+                    src={imgSrc} 
+                    alt={name} 
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover" 
+                    onError={handleError}
+                />
+            );
+        });
 
         // --- Ícones SVG Inline ---
         const Icon = ({ path, className, size = 24, fill = "none", stroke = "currentColor" }) => (
@@ -191,31 +227,22 @@
                     const trimmed = line.trim();
                     if (!trimmed) return;
                     
-                    // Detecção de separador (vírgula ou ponto e vírgula)
                     const separator = trimmed.includes(';') ? ';' : ',';
                     
                     let parts;
                     if (separator === ';') {
-                        // Split simples para ;
                         parts = trimmed.split(';');
                     } else {
-                        // Regex para dividir CSV respeitando aspas (padrão)
                         parts = trimmed.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
                     }
                     
                     let name = '';
                     let customImage = null;
 
-                    // Lógica para detectar o formato de exportação (7 colunas ou mais)
-                    // user id, username, full name, followed by you, is verified, profile url, avatar url
                     if (parts.length >= 7) {
                         const colUsername = parts[1] ? parts[1].trim().replace(/^"|"$/g, '') : '';
-                        
-                        // Busca inteligente da URL da imagem
-                        // Primeiro tenta a coluna 6 (avatar url)
                         let rawUrl = parts[6] ? parts[6].trim().replace(/^"|"$/g, '') : '';
                         
-                        // Se a coluna 6 não parecer um link, varre a linha procurando algo que comece com http
                         if (!rawUrl.startsWith('http')) {
                             const found = parts.find(p => p && p.trim().replace(/^"|"$/g, '').startsWith('http'));
                             if (found) {
@@ -223,32 +250,24 @@
                             }
                         }
 
-                        // Ignora a linha de cabeçalho
                         if (colUsername.toLowerCase() === 'username' || parts[0].toLowerCase().includes('user id')) {
                             return;
                         }
 
                         name = colUsername.replace('@', '');
-                        
-                        // Correção de URL (Decodifica &amp; para &)
                         if (rawUrl) {
                             customImage = rawUrl.replace(/&amp;/g, '&');
                         }
-                    } 
-                    // Fallback para formato simples "nome, imagem" (manual)
-                    else if (parts.length >= 2) {
+                    } else if (parts.length >= 2) {
                         name = parts[0].trim().replace(/^"|"$/g, '').replace('@', '');
                         const rawUrl = parts.slice(1).join(separator).trim().replace(/^"|"$/g, '');
                         if (rawUrl.startsWith('http')) {
                              customImage = rawUrl.replace(/&amp;/g, '&');
                         }
-                    } 
-                    // Fallback para apenas nome
-                    else {
+                    } else {
                         name = trimmed.replace(/^"|"$/g, '').replace('@', '');
                     }
 
-                    // Tenta encontrar imagem local correspondente
                     const nameKey = name.toLowerCase().trim().replace(/[\s-]/g, '_');
                     if (localImages[name] || localImages[nameKey]) {
                         customImage = localImages[name] || localImages[nameKey];
@@ -272,10 +291,7 @@
                     name: data.name,
                     hp: 100,
                     maxHp: 100,
-                    // Usa a imagem padrão se não houver imagem customizada
-                    avatar: data.customImage 
-                        ? data.customImage 
-                        : DEFAULT_AVATAR,
+                    avatar: data.customImage ? data.customImage : DEFAULT_AVATAR,
                     isHit: false,
                     lastDamage: 0,
                     hitCooldown: 0,
@@ -624,16 +640,7 @@
                                         }
                                         transition-all duration-100 bg-gray-800
                                     `}>
-                                        <img 
-                                            src={f.avatar} 
-                                            alt={f.name} 
-                                            referrerPolicy="no-referrer"
-                                            className="w-full h-full object-cover" 
-                                            onError={(e) => {
-                                                e.target.onerror = null;
-                                                e.target.src = DEFAULT_AVATAR;
-                                            }}
-                                        />
+                                        <FighterAvatar url={f.avatar} name={f.name} />
                                         {isDead && <div className="absolute inset-0 bg-black/60 flex items-center justify-center"><Skull size={20}/></div>}
                                     </div>
 
@@ -670,16 +677,7 @@
                                 
                                 <div className="my-8 relative group">
                                     <div className="w-48 h-48 rounded-full border-4 border-yellow-400 overflow-hidden mx-auto shadow-[0_0_50px_rgba(250,204,21,0.4)] group-hover:scale-105 transition-transform bg-gray-800">
-                                        <img 
-                                            src={winner.avatar} 
-                                            alt="Winner" 
-                                            className="w-full h-full object-cover" 
-                                            referrerPolicy="no-referrer"
-                                            onError={(e) => {
-                                                e.target.onerror = null;
-                                                e.target.src = DEFAULT_AVATAR;
-                                            }}
-                                        />
+                                        <FighterAvatar url={winner.avatar} name={winner.name} />
                                     </div>
                                     <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black font-bold px-4 py-1 rounded-full border-2 border-white shadow-lg whitespace-nowrap">
                                         {winner.hp} HP RESTANTE
