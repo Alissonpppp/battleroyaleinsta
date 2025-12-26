@@ -19,9 +19,9 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, getDocs, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        window.firebaseModules = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, collection, addDoc, getDocs, query, orderBy, serverTimestamp };
+        window.firebaseModules = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp };
     </script>
     
     <style>
@@ -104,7 +104,6 @@
         };
 
         // --- Components ---
-        // Avatar Simplificado: Apenas exibe a URL (que já foi tratada pelo Preloader)
         const FighterAvatar = memo(({ url, name }) => {
             return (
                 <img 
@@ -136,6 +135,7 @@
         const Copy = (p) => <Icon {...p} path={<><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>} />;
         const RotateCcw = (p) => <Icon {...p} path={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />;
         const Search = (p) => <Icon {...p} path={<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>} />;
+        const Trash = (p) => <Icon {...p} path={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>} />;
 
         function InstagramBattle() {
             const [gameState, setGameState] = useState('setup');
@@ -148,7 +148,7 @@
             const [isRecording, setIsRecording] = useState(false);
             const [cinemaMode, setCinemaMode] = useState(false);
             const [localImages, setLocalImages] = useState({});
-            const [showSaveOptions, setShowSaveOptions] = useState(false); // Novo estado para controlar a visualização
+            const [showSaveOptions, setShowSaveOptions] = useState(false);
             
             const [loadProgress, setLoadProgress] = useState(0);
             const [totalToLoad, setTotalToLoad] = useState(0);
@@ -310,7 +310,7 @@
                                 if (roll < 0.45) {
                                     f2.hp = Math.max(0, f2.hp - dmg); msg = `@${f1.name} hit @${f2.name} (-${dmg})`; playHitSound(isMuted);
                                     const hpBar = document.getElementById(`hp-bar-${f2.id}`); if(hpBar) { hpBar.style.width = `${f2.hp}%`; if(f2.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
-                                    // Remove ghost logic: Hide immediately
+                                    // FORCE HIDE
                                     if (f2.hp <= 0 && f2.eliminationOrder === -1) { 
                                         f2.eliminationOrder = eliminationCounter.current++; 
                                         const elF2 = document.getElementById(`fighter-${f2.id}`); 
@@ -319,7 +319,7 @@
                                 } else if (roll < 0.90) {
                                     f1.hp = Math.max(0, f1.hp - dmg); msg = `@${f2.name} hit @${f1.name} (-${dmg})`; playHitSound(isMuted);
                                     const hpBar = document.getElementById(`hp-bar-${f1.id}`); if(hpBar) { hpBar.style.width = `${f1.hp}%`; if(f1.hp < 30) hpBar.style.backgroundColor = '#ef4444'; }
-                                    // Remove ghost logic: Hide immediately
+                                    // FORCE HIDE
                                     if (f1.hp <= 0 && f1.eliminationOrder === -1) { 
                                         f1.eliminationOrder = eliminationCounter.current++; 
                                         const elF1 = document.getElementById(`fighter-${f1.id}`); 
@@ -365,37 +365,28 @@
 
             const saveRankingToFirebase = async () => {
                 if (!db || isSaving) return;
-                
-                // Extra Security Check
-                if (!auth.currentUser) {
-                    alert("Aguarde a autenticação do sistema...");
-                    return;
-                }
-
+                if (!auth.currentUser) { alert("Aguarde a autenticação..."); return; }
                 setIsSaving(true);
                 try {
                     const { collection, addDoc, serverTimestamp } = window.firebaseModules;
-                    
-                    const userId = auth.currentUser.uid;
-
-                    // Write to PUBLIC data as requested
                     const simpleRanking = finalRanking.map((f, index) => ({ position: index + 1, name: f.name, avatar: f.avatar }));
-                    
-                    // Usa a variável globalAppId capturada na inicialização para garantir consistência
                     await addDoc(collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles'), { 
-                        name: battleName, 
-                        date: serverTimestamp(), 
-                        winner: winner.name, 
-                        ranking: simpleRanking,
-                        createdBy: userId
+                        name: battleName, date: serverTimestamp(), winner: winner.name, ranking: simpleRanking, createdBy: auth.currentUser.uid
                     });
-                    
                     alert("Ranking salvo com sucesso!");
-                } catch (e) { 
-                    console.error("Erro ao salvar:", e); 
-                    alert(`Erro ao salvar: ${e.message}`); 
-                }
+                } catch (e) { console.error("Erro ao salvar:", e); alert(`Erro ao salvar: ${e.message}`); }
                 setIsSaving(false);
+            };
+
+            const deleteRanking = async (id, e) => {
+                e.stopPropagation();
+                if (!confirm("Tem certeza que deseja excluir este ranking?")) return;
+                try {
+                    const { deleteDoc, doc } = window.firebaseModules;
+                    await deleteDoc(doc(db, 'artifacts', globalAppId, 'public', 'data', 'battles', id));
+                    setSavedBattles(prev => prev.filter(b => b.id !== id));
+                    if (selectedBattle?.id === id) setSelectedBattle(null);
+                } catch (err) { console.error(err); alert("Erro ao excluir."); }
             };
 
             const copyRankingForBio = () => {
@@ -432,11 +423,9 @@
                 if (!db) return;
                 const { collection, getDocs, query, orderBy } = window.firebaseModules;
                 try {
-                    // Using Public path correctly without orderBy if permissions fail
                     const q = query(collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles'));
                     const snapshot = await getDocs(q);
                     const battles = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                    // Sort in memory
                     battles.sort((a,b) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
                     setSavedBattles(battles);
                 } catch (e) { console.error(e); }
@@ -502,13 +491,16 @@
                                         <div 
                                             key={b.id} 
                                             onClick={() => setSelectedBattle(b)}
-                                            className={`p-4 border-b border-gray-700 cursor-pointer hover:bg-gray-700 transition ${selectedBattle?.id === b.id ? 'bg-gray-700 border-l-4 border-l-pink-500' : ''}`}
+                                            className={`p-4 border-b border-gray-700 cursor-pointer hover:bg-gray-700 transition flex justify-between items-center ${selectedBattle?.id === b.id ? 'bg-gray-700 border-l-4 border-l-pink-500' : ''}`}
                                         >
-                                            <div className="font-bold text-lg">{b.name}</div>
-                                            <div className="text-sm text-gray-400 flex justify-between">
-                                                <span>🏆 {b.winner}</span>
-                                                <span>{b.date ? new Date(b.date.seconds * 1000).toLocaleDateString() : 'Hoje'}</span>
+                                            <div>
+                                                <div className="font-bold text-lg">{b.name}</div>
+                                                <div className="text-sm text-gray-400 flex gap-4">
+                                                    <span>🏆 {b.winner}</span>
+                                                    <span>{b.date ? new Date(b.date.seconds * 1000).toLocaleDateString() : 'Hoje'}</span>
+                                                </div>
                                             </div>
+                                            <button onClick={(e) => deleteRanking(b.id, e)} className="text-red-500 hover:text-red-400 p-2 rounded-full hover:bg-red-500/10"><Trash size={18}/></button>
                                         </div>
                                     ))}
                                 </div>
@@ -558,7 +550,18 @@
 
                     <div ref={arenaRef} className="absolute inset-0 overflow-hidden">
                         {(gameState === 'fighting' || gameState === 'winner') && fighters.map((f) => (
-                            <div key={f.id} id={`fighter-${f.id}`} className="absolute flex flex-col items-center justify-center fighter-container" style={{ width: `${f.size}px`, transform: `translate(${f.x}px, ${f.y}px)`, zIndex: 10 }}>
+                            <div 
+                                key={f.id} 
+                                id={`fighter-${f.id}`} 
+                                className="absolute flex flex-col items-center justify-center fighter-container" 
+                                style={{ 
+                                    width: `${f.size}px`, 
+                                    transform: `translate(${f.x}px, ${f.y}px)`, 
+                                    zIndex: 10,
+                                    // FIXED: Directly control visibility via React based on state, ensures no ghosts
+                                    display: f.hp <= 0 ? 'none' : 'flex' 
+                                }}
+                            >
                                 <div className="relative w-full aspect-square rounded-full border-4 border-white/20 overflow-hidden shadow-xl bg-gray-800">
                                     <FighterAvatar url={f.avatar} name={f.name} />
                                 </div>
