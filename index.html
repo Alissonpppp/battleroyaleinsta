@@ -47,6 +47,9 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback } = React;
 
+        // Imagem padrão estilo Instagram (Silhueta Cinza)
+        const DEFAULT_AVATAR = "https://upload.wikimedia.org/wikipedia/commons/a/ac/Default_pfp.jpg";
+
         // --- Gerenciador de Áudio (Sintetizador Web Audio API) ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -59,7 +62,6 @@
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             
-            // Som de soco: Onda quadrada com queda rápida de frequência
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             
@@ -112,15 +114,15 @@
         const Swords = (props) => <Icon {...props} path={<><path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="m13 19 6-6"/><path d="M16 16 7 7"/><path d="m21 21-6-6"/></>} />;
         const Trophy = (props) => <Icon {...props} path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />;
         const Skull = (props) => <Icon {...props} path={<><path d="M11 20H8a2 2 0 0 1-2-2V9a9 9 0 0 1 18 0v9a2 2 0 0 1-2 2h-3"/><path d="M10 15h4"/><path d="M9 20v2"/><path d="M15 20v2"/></>} />;
-        const RotateCcw = (props) => <Icon {...props} path={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />;
         const Volume2 = (props) => <Icon {...props} path={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></>} />;
         const VolumeX = (props) => <Icon {...props} path={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>} />;
         const Video = (props) => <Icon {...props} path={<><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></>} />;
         const Square = (props) => <Icon {...props} path={<rect width="18" height="18" x="3" y="3" rx="2" ry="2" />} />;
         const FileUp = (props) => <Icon {...props} path={<><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></>} />;
+        const ImagePlus = (props) => <Icon {...props} path={<><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><line x1="16" x2="22" y1="5" y2="5"/><line x1="19" x2="19" y1="2" y2="8"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></>} />;
 
         function InstagramBattle() {
-            const [gameState, setGameState] = useState('setup'); // setup, fighting, winner
+            const [gameState, setGameState] = useState('setup'); 
             const [fighters, setFighters] = useState([]);
             const [logs, setLogs] = useState([]);
             const [inputNames, setInputNames] = useState('');
@@ -128,6 +130,7 @@
             const [winner, setWinner] = useState(null);
             const [isMuted, setIsMuted] = useState(false);
             const [isRecording, setIsRecording] = useState(false);
+            const [localImages, setLocalImages] = useState({});
             
             const arenaRef = useRef(null);
             const animationFrame = useRef(null);
@@ -135,7 +138,6 @@
             const mediaRecorderRef = useRef(null);
             const chunksRef = useRef([]);
 
-            // Helper para detectar colisão e resolver física
             const checkCollision = (f1, f2) => {
                 const dx = (f2.x + f2.size/2) - (f1.x + f1.size/2);
                 const dy = (f2.y + f2.size/2) - (f1.y + f1.size/2);
@@ -160,6 +162,23 @@
                 reader.readAsText(file);
             };
 
+            const handleImageUpload = (event) => {
+                const files = Array.from(event.target.files);
+                if (files.length === 0) return;
+
+                const newImages = { ...localImages };
+                
+                files.forEach(file => {
+                    const nameKey = file.name.split('.')[0].toLowerCase().trim().replace(/[\s-]/g, '_');
+                    newImages[nameKey] = URL.createObjectURL(file);
+                    const exactName = file.name.split('.')[0].trim();
+                    newImages[exactName] = URL.createObjectURL(file);
+                });
+
+                setLocalImages(newImages);
+                alert(`${files.length} imagens carregadas! Elas serão usadas automaticamente se o nome do arquivo coincidir com o nome do competidor.`);
+            };
+
             const handleStart = () => {
                 if (audioCtx.state === 'suspended') {
                     audioCtx.resume();
@@ -171,7 +190,7 @@
                 rawLines.forEach((line) => {
                     const trimmed = line.trim();
                     if (!trimmed) return;
-                    // Tenta detectar separador: virgula ou ponto e virgula
+                    
                     const separator = trimmed.includes(',') ? ',' : trimmed.includes(';') ? ';' : null;
                     
                     let name = trimmed;
@@ -181,11 +200,15 @@
                         const parts = trimmed.split(separator);
                         name = parts[0].trim().replace('@', '');
                         if (parts.length > 1) {
-                             // Pega a URL. Remove aspas se houver
                              customImage = parts.slice(1).join(separator).trim().replace(/['"]/g, "");
                         }
                     } else {
                         name = trimmed.replace('@', '');
+                    }
+
+                    const nameKey = name.toLowerCase().trim().replace(/[\s-]/g, '_');
+                    if (localImages[name] || localImages[nameKey]) {
+                        customImage = localImages[name] || localImages[nameKey];
                     }
 
                     if (name.length > 0) {
@@ -206,9 +229,10 @@
                     name: data.name,
                     hp: 100,
                     maxHp: 100,
+                    // Usa a imagem padrão se não houver imagem customizada
                     avatar: data.customImage 
                         ? data.customImage 
-                        : `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.name}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
+                        : DEFAULT_AVATAR,
                     isHit: false,
                     lastDamage: 0,
                     hitCooldown: 0,
@@ -471,21 +495,41 @@
                                     </p>
                                 </div>
 
-                                {/* FILE INPUT */}
-                                <div className="bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed">
-                                    <label className="flex flex-col items-center cursor-pointer group">
-                                        <div className="flex items-center gap-2 text-pink-400 group-hover:text-pink-300 transition">
-                                            <FileUp size={24} />
-                                            <span className="font-bold">Carregar Arquivo (.txt / .csv)</span>
-                                        </div>
-                                        <span className="text-xs text-gray-500 mt-1">Substitui o conteúdo abaixo automaticamente</span>
-                                        <input 
-                                            type="file" 
-                                            accept=".txt,.csv"
-                                            onChange={handleFileUpload}
-                                            className="hidden"
-                                        />
-                                    </label>
+                                {/* FILE INPUTS ROW */}
+                                <div className="flex gap-4 w-full">
+                                    {/* LIST FILE INPUT */}
+                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-pink-500 transition">
+                                        <label className="flex flex-col items-center cursor-pointer group h-full justify-center">
+                                            <div className="flex items-center gap-2 text-pink-400 group-hover:text-pink-300 transition">
+                                                <FileUp size={24} />
+                                                <span className="font-bold text-sm">Lista de Nomes (.txt)</span>
+                                            </div>
+                                            <input 
+                                                type="file" 
+                                                accept=".txt,.csv"
+                                                onChange={handleFileUpload}
+                                                className="hidden"
+                                            />
+                                        </label>
+                                    </div>
+
+                                    {/* IMAGE FOLDER INPUT */}
+                                    <div className="flex-1 bg-gray-800 rounded-lg p-4 border border-gray-600 border-dashed hover:border-green-500 transition">
+                                        <label className="flex flex-col items-center cursor-pointer group h-full justify-center">
+                                            <div className="flex items-center gap-2 text-green-400 group-hover:text-green-300 transition">
+                                                <ImagePlus size={24} />
+                                                <span className="font-bold text-sm">Carregar Fotos (Várias)</span>
+                                            </div>
+                                            <span className="text-[10px] text-gray-500 mt-1 text-center leading-tight">Nome do arquivo deve ser igual ao nome do usuário</span>
+                                            <input 
+                                                type="file" 
+                                                accept="image/*"
+                                                multiple
+                                                onChange={handleImageUpload}
+                                                className="hidden"
+                                            />
+                                        </label>
+                                    </div>
                                 </div>
 
                                 <textarea
@@ -544,7 +588,7 @@
                                             className="w-full h-full object-cover" 
                                             onError={(e) => {
                                                 e.target.onerror = null;
-                                                e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${f.name}`;
+                                                e.target.src = DEFAULT_AVATAR;
                                             }}
                                         />
                                         {isDead && <div className="absolute inset-0 bg-black/60 flex items-center justify-center"><Skull size={20}/></div>}
@@ -583,7 +627,16 @@
                                 
                                 <div className="my-8 relative group">
                                     <div className="w-48 h-48 rounded-full border-4 border-yellow-400 overflow-hidden mx-auto shadow-[0_0_50px_rgba(250,204,21,0.4)] group-hover:scale-105 transition-transform bg-gray-800">
-                                        <img src={winner.avatar} alt="Winner" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                        <img 
+                                            src={winner.avatar} 
+                                            alt="Winner" 
+                                            className="w-full h-full object-cover" 
+                                            referrerPolicy="no-referrer"
+                                            onError={(e) => {
+                                                e.target.onerror = null;
+                                                e.target.src = DEFAULT_AVATAR;
+                                            }}
+                                        />
                                     </div>
                                     <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black font-bold px-4 py-1 rounded-full border-2 border-white shadow-lg whitespace-nowrap">
                                         {winner.hp} HP RESTANTE
