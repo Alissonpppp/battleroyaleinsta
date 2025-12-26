@@ -47,7 +47,7 @@
         const { useState, useEffect, useRef, useCallback, memo } = React;
 
         // ==========================================================================================
-        // --- ÁREA DE CONFIGURAÇÃO (JÁ PREENCHIDA COM SEUS DADOS) ---
+        // --- ÁREA DE CONFIGURAÇÃO (PREENCHIDA) ---
         // ==========================================================================================
         const MY_FIREBASE_CONFIG = {
             apiKey: "AIzaSyDfHbm9EEHHYsJjkrPcQuGz2W08yfihnKg",
@@ -73,15 +73,10 @@
 
             const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, getFirestore } = window.firebaseModules;
             try {
-                // Tenta usar a configuração injetada (Canvas) OU a manual (GitHub)
                 let firebaseConfig = JSON.parse(window.__firebase_config || '{}');
-                
-                // Se estiver vazio (no GitHub), usa a configuração manual preenchida acima
                 if (Object.keys(firebaseConfig).length === 0 && MY_FIREBASE_CONFIG.apiKey) {
                     firebaseConfig = MY_FIREBASE_CONFIG;
-                    console.log("Usando configuração manual do Firebase.");
                 }
-
                 globalAppId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
                 
                 if (Object.keys(firebaseConfig).length > 0) {
@@ -93,7 +88,7 @@
                     window.firebaseInitialized = true;
                     console.log("Firebase Conectado!");
                 } else {
-                    console.warn("Sem configuração do Firebase. Preencha MY_FIREBASE_CONFIG no código.");
+                    console.warn("Sem configuração do Firebase (Modo Offline)");
                 }
             } catch (e) { console.error("Erro Firebase (Usando Offline):", e); }
         };
@@ -159,6 +154,7 @@
         const RotateCcw = (p) => <Icon {...p} path={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />;
         const Search = (p) => <Icon {...p} path={<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>} />;
         const Trash = (p) => <Icon {...p} path={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>} />;
+        const CloudUpload = (p) => <Icon {...p} path={<><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></>} />;
 
         function InstagramBattle() {
             const [gameState, setGameState] = useState('setup');
@@ -398,8 +394,10 @@
                         const { collection, addDoc, serverTimestamp } = window.firebaseModules;
                         const userId = auth.currentUser.uid;
                         await addDoc(collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles'), { 
-                            ...newBattle,
+                            name: newBattle.name,
                             date: serverTimestamp(),
+                            winner: newBattle.winner,
+                            ranking: newBattle.ranking,
                             createdBy: userId
                         });
                         alert("Ranking salvo na nuvem com sucesso!");
@@ -412,9 +410,43 @@
                     const saved = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
                     saved.push(newBattle);
                     localStorage.setItem('batebate_rankings', JSON.stringify(saved));
-                    alert("Ranking salvo LOCALMENTE (Não configurado na nuvem)."); 
+                    alert("Ranking salvo LOCALMENTE (Não configurado na nuvem ou erro de conexão)."); 
                 }
                 setIsSaving(false);
+            };
+
+            const publishToCloud = async (battle, e) => {
+                e.stopPropagation();
+                if (!db) { alert("Erro: Firebase não inicializado."); return; }
+                if (!auth.currentUser) { alert("Erro: Não autenticado na nuvem."); return; }
+
+                if (!confirm("Deseja publicar este ranking local na nuvem agora?")) return;
+
+                try {
+                    const { collection, addDoc } = window.firebaseModules;
+                    
+                    const { id, ...data } = battle;
+                    // Converte seconds de volta para Date js para o Firestore
+                    const dateObj = new Date(data.date.seconds * 1000);
+
+                    await addDoc(collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles'), {
+                        ...data,
+                        date: dateObj, 
+                        createdBy: auth.currentUser.uid,
+                        publishedFromLocal: true
+                    });
+
+                    // Remove do LocalStorage
+                    const saved = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
+                    const filtered = saved.filter(b => b.id !== id);
+                    localStorage.setItem('batebate_rankings', JSON.stringify(filtered));
+
+                    alert("Sucesso! O ranking agora está na nuvem.");
+                    openRankingBrowser(); 
+                } catch (err) {
+                    console.error(err);
+                    alert("Erro ao publicar: " + err.message);
+                }
             };
 
             const deleteRanking = async (id, e) => {
@@ -422,13 +454,11 @@
                 if (!confirm("Tem certeza que deseja excluir este ranking?")) return;
                 
                 if (id.startsWith('local-')) {
-                    // Deletar Local
                     const saved = JSON.parse(localStorage.getItem('batebate_rankings') || '[]');
                     const filtered = saved.filter(b => b.id !== id);
                     localStorage.setItem('batebate_rankings', JSON.stringify(filtered));
                     setSavedBattles(prev => prev.filter(b => b.id !== id));
                 } else if (db) {
-                    // Deletar Firebase
                     try {
                         const { deleteDoc, doc } = window.firebaseModules;
                         await deleteDoc(doc(db, 'artifacts', globalAppId, 'public', 'data', 'battles', id));
@@ -478,7 +508,7 @@
                 } catch(e) { console.error("Erro localStorage", e); }
 
                 // 2. Carregar do Firebase (se disponível)
-                if (db) {
+                if (db && auth && auth.currentUser) {
                     const { collection, getDocs, query, orderBy } = window.firebaseModules;
                     try {
                         const q = query(collection(db, 'artifacts', globalAppId, 'public', 'data', 'battles'));
@@ -556,13 +586,29 @@
                                             className={`p-4 border-b border-gray-700 cursor-pointer hover:bg-gray-700 transition flex justify-between items-center ${selectedBattle?.id === b.id ? 'bg-gray-700 border-l-4 border-l-pink-500' : ''}`}
                                         >
                                             <div>
-                                                <div className="font-bold text-lg">{b.name}</div>
+                                                <div className="font-bold text-lg flex items-center gap-2">
+                                                    {b.name}
+                                                    {b.id.toString().startsWith('local-') && (
+                                                        <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-1 rounded border border-yellow-500/30">LOCAL</span>
+                                                    )}
+                                                </div>
                                                 <div className="text-sm text-gray-400 flex gap-4">
                                                     <span>🏆 {b.winner}</span>
                                                     <span>{b.date ? new Date(b.date.seconds * 1000).toLocaleDateString() : 'Hoje'}</span>
                                                 </div>
                                             </div>
-                                            <button onClick={(e) => deleteRanking(b.id, e)} className="text-red-500 hover:text-red-400 p-2 rounded-full hover:bg-red-500/10"><Trash size={18}/></button>
+                                            <div className="flex gap-2">
+                                                {b.id.toString().startsWith('local-') && (
+                                                    <button 
+                                                        onClick={(e) => publishToCloud(b, e)} 
+                                                        className="text-green-400 hover:text-green-300 p-2 rounded-full hover:bg-green-500/10"
+                                                        title="Publicar na Nuvem"
+                                                    >
+                                                        <CloudUpload size={18}/>
+                                                    </button>
+                                                )}
+                                                <button onClick={(e) => deleteRanking(b.id, e)} className="text-red-500 hover:text-red-400 p-2 rounded-full hover:bg-red-500/10"><Trash size={18}/></button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
